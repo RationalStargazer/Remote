@@ -3,7 +3,7 @@ package net.rationalstargazer.events
 import net.rationalstargazer.*
 import java.util.*
 
-interface EventSource<out T> : HasContinuousLifecycle {
+interface EventSource<out T> : HasLifecycle {
 
     fun listen(listener: Listener<T>)
 
@@ -22,6 +22,14 @@ interface Value<out T> : EventSource<T> {
     //fun listenInvalidate(lifecycle: Lifecycle, listener: () -> Unit)
 }
 
+interface ValueCustomConsumer<T> {
+    val oldValue: T
+    val nextValue: T
+    fun set(nextValue: T)
+    fun dispatch()
+    fun setAndDispatch(nextValue: T)
+}
+
 /**
  * "Variable" is writable [Value]
  */
@@ -30,137 +38,60 @@ interface Variable<T> : Value<T> {
     override var value: T
 }
 
-interface HasContinuousLifecycle {
-
+interface HasLifecycle {
     val lifecycle: Lifecycle
 }
 
-interface LifecycleBase {
+// interface LifecycleBased {
+//
+//     val finished: Boolean
+//
+//     fun listen(listener: Listener<Unit>)
+//
+//     fun listen(listenerLifecycle: Lifecycle, listener: () -> Unit) {
+//         listen(StdListener(listenerLifecycle) { listener() })
+//     }
+// }
 
-    val closed: Boolean
+interface Lifecycle {
+
+    val coordinator: EventsQueueDispatcher
 
     val finished: Boolean
 
-    fun listenCloseImmediately(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>)
+    fun listen(listener: Listener<Unit>)
 
-    fun listenCloseImmediately(
-        listenerLifecycle: Lifecycle,
-        callIfAlreadyClosed: Boolean,
-        listener: (hasClosedBefore: Boolean) -> Unit
-    ) {
-        listenCloseImmediately(callIfAlreadyClosed, StdListener(listenerLifecycle, listener))
-    }
-
-    fun listenCloseStreamlined(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>)
-
-    fun listenCloseStreamlined(
-        listenerLifecycle: Lifecycle,
-        callIfAlreadyClosed: Boolean,
-        listener: (hasClosedBefore: Boolean) -> Unit
-    ) {
-        listenCloseStreamlined(callIfAlreadyClosed, StdListener(listenerLifecycle, listener))
+    fun listen(listenerLifecycle: Lifecycle, listener: () -> Unit) {
+        listen(StdListener(listenerLifecycle) { listener() })
     }
 }
 
-interface Lifecycle : LifecycleBase {
+interface SuspendableLifecycle {
 
-    object Forever : Lifecycle {
-
-        override val closed: Boolean = false
-
-        override val finished: Boolean = false
-
-        override fun listenCloseImmediately(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-
-        override fun listenCloseImmediately(
-            listenerLifecycle: Lifecycle,
-            callIfAlreadyClosed: Boolean,
-            listener: (hasClosedBefore: Boolean) -> Unit
-        ) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-
-        override fun listenCloseStreamlined(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-
-        override fun listenCloseStreamlined(
-            listenerLifecycle: Lifecycle,
-            callIfAlreadyClosed: Boolean,
-            listener: (hasClosedBefore: Boolean) -> Unit
-        ) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-    }
-
-    object UntilTheEnd : Lifecycle {
-        override val closed: Boolean = false
-        override val finished: Boolean = false
-
-        override fun listenCloseImmediately(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-
-        override fun listenCloseStreamlined(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-
-        override fun listenCloseStreamlined(
-            listenerLifecycle: Lifecycle,
-            callIfAlreadyClosed: Boolean,
-            listener: (hasClosedBefore: Boolean) -> Unit
-        ) {
-            // nothing to do (forever lifecycle will never be closed)
-        }
-    }
-
-    object Finished : Lifecycle {
-
-        override val closed: Boolean = true
-
-        override val finished: Boolean = true
-
-        override fun listenCloseImmediately(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-            lifecycle.listenCloseImmediately(callIfAlreadyClosed, listener)
-        }
-
-        override fun listenCloseStreamlined(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-            lifecycle.listenCloseStreamlined(callIfAlreadyClosed, listener)
-        }
-
-        private val lifecycle = LifecycleDispatcher().also { it.closeImmediately() }
-    }
-}
-
-interface SuspendableLifecycle : LifecycleBase {
+    //val continuousLifecycle??
 
     val active: Boolean
 
-    fun listenStateChange(listener: Listener<Boolean>)
-
-    fun listenStateChange(listenerLifecycle: Lifecycle, listener: (value: Boolean) -> Unit) {
-        listenStateChange(StdListener(listenerLifecycle, listener))
-    }
+    // fun listenStateChange(listener: Listener<Boolean>)
+    //
+    // fun listenStateChange(listenerLifecycle: Lifecycle, listener: (value: Boolean) -> Unit) {
+    //     listenStateChange(StdListener(listenerLifecycle, listener))
+    // }
 }
 
 interface ViewLifecycle : SuspendableLifecycle
 
-interface ControlledLifecycle : LifecycleBase {
+interface ControlledLifecycle : LifecycleBased {
 
-    fun closeImmediately()
+    // not final api
+    //fun closeImmediately()
 }
 
 interface Listener<in T> {
 
-    val finished: Boolean
+    val lifecycle: Lifecycle
 
     fun notify(value: T)
-
-    fun addRequestDisposeCallback(requestDisposeCallback: (Listener<T>) -> Unit)
-
-    fun removeRequestDisposeCallback(requestDisposeCallback: (Listener<T>) -> Unit)
 }
 
 private interface EventsCoordinator {
@@ -180,72 +111,67 @@ private fun events(updateLogic: EventsCoordinator.() -> Unit) {
 /**
  * Currently not part of public API (but can be in the future)
  *
- * dispatchImmediately is designed for use from main (UI) thread. Multithreading is not allowed. Details: events can be dispatched at the wrong thread when using in different threads simultaneously. [LifecycleBase] implementation depends on using dispatch() on UI thread, so you can't use it from a background thread without introducing critical bugs. Note: if you need events at a background thread you can improve implementation of dispatch() to use different EventsGlobalCoordinator for different threads, this way you will not need events synchronization and overly-complicated switching threads logic during dispatch (but events in different threads will be treated as completely unrelated, so there will be no ordering (sorting) for events from different threads).
+ * dispatchImmediately is designed for use from main (UI) thread. Multithreading is not allowed. Details: events can be dispatched at the wrong thread when using in different threads simultaneously. [LifecycleCommon] implementation depends on using dispatch() on UI thread, so you can't use it from a background thread without introducing critical bugs. Note: if you need events at a background thread you can improve implementation of dispatch() to use different EventsGlobalCoordinator for different threads, this way you will not need events synchronization and overly-complicated switching threads logic during dispatch (but events in different threads will be treated as completely unrelated, so there will be no ordering (sorting) for events from different threads).
  */
 //private fun dispatchImmediately(updateLogic: EventsCoordinator.() -> Unit) {
 //    ImmediateEventsGlobalCoordinator.dispatch(updateLogic)
 //}
 
 class ListenersRegistry<T>(
-    override val lifecycle: Lifecycle,
-    //val extendLifecycleUntilFinished: Boolean = false
-) : HasContinuousLifecycle {
+    lifecycle: Lifecycle
+) {
+
+    private val registryLifecycle: Lifecycle = lifecycle
 
     fun add(listener: Listener<T>) {
-        if (listener.finished || checkFinished()) {
+        add(listener.lifecycle, listener::notify)
+    }
+
+    fun add(listenerLifecycle: Lifecycle, listenerFunction: (T) -> Unit) {
+        if (listenerLifecycle.finished) {
             return
         }
 
-        listener.addRequestDisposeCallback(this::disposeItem)
-        items.add(listener)
-    }
-
-    fun getListeners(): ImmutableList<Listener<T>> {
-        if (checkFinished()) {
-            return immutableListOf()
+        if (listenerLifecycle == registryLifecycle) {
+            commonItems.add(listenerFunction)
+            return
         }
 
-        return copyToImmutable(items)
+        val registry = otherLifecyclesItems[listenerLifecycle]
+            ?: ListenersRegistry<T>(listenerLifecycle).also { otherLifecyclesItems[listenerLifecycle] = it }
+
+        registry.add(listenerLifecycle, listenerFunction)
     }
 
-    private val items: Deque<Listener<T>> = LinkedList()
-
-    private var finished = false
-
-    private fun disposeItem(item: Listener<T>) {
-        items.remove(item)
-    }
-
-    private fun checkFinished(): Boolean {
-        return if (finished) {
-            true
-        } else {
-            if (lifecycle.closed) {
-                if (!extendLifecycleUntilFinished) {
-                    cleanAll()
-                    true
-                } else {
-                    if (lifecycle.finished) {
-                        cleanAll()
-                        true
-                    } else {
-                        false
-                    }
-                }
-            } else {
-                false
-            }
+    fun enqueueEvent(eventValue: T) {
+        if (registryLifecycle.finished) {
+            return
         }
+
+        registryLifecycle.coordinator.enqueue(registryLifecycle, listeners(), eventValue)
     }
 
-    private fun cleanAll() {
-        finished = true
-        items.forEach { it.removeRequestDisposeCallback(this::disposeItem) }
-        items.clear()
+    private fun listeners(): ImmutableList<(T) -> Unit> {
+        val list = commonItems.toMutableList()
+        otherLifecyclesItems.values.forEach {
+            list.addAll(it.listeners())
+        }
+
+        return list.considerImmutable()
+    }
+
+    private val commonItems: Deque<(T) -> Unit> = LinkedList()
+    private val otherLifecyclesItems: MutableMap<Lifecycle, ListenersRegistry<T>> = mutableMapOf()
+
+    private fun close() {
+        commonItems.clear()
+        otherLifecyclesItems.clear()
     }
 
     init {
-        lifecycle.li
+        if (!registryLifecycle.finished) {
+            registryLifecycle.listen(registryLifecycle, ::close)
+        }
     }
 }
 
@@ -253,91 +179,12 @@ private class StdListener<T>(
     override val lifecycle: Lifecycle,
     private val listenerFunction: (T) -> Unit) : Listener<T> {
 
-//    override val finished: Boolean get() {
-//        if (mFinished) return true
-//
-//        val closed = lifecycle!!.closed
-//        if (closed) {
-//            finish()
-//        }
-//
-//        return closed
-//    }
-
     override fun notify(value: T) {
-        if (!lifecycle.closed) {
+        if (!lifecycle.finished) {
             listenerFunction(value)
         }
     }
-
-//    private fun finish() {
-//        mFinished = true
-//        lifecycle = null
-//        listener = null
-//    }
-
-//    private var mFinished = false
-
-    //private var lifecycle: Lifecycle? = lifecycle
-
-    //private var listener: ((T) -> Unit)? = listenerFunction
 }
-
-private class ManualListener<T>(private val listenerFunction: (T) -> Unit) : Listener<T> {
-
-    override fun createItemHolder(requestDisposeCallback: () -> Unit): Listener.Item<T> {
-        TODO("Not yet implemented")
-    }
-
-    override fun notify(value: T) {
-        if (!finished) {
-            listenerFunction(value)
-        }
-    }
-
-    private var finished = false
-
-    private class Item<T>(private val host: ManualListener<T>, private val callback: (T) -> Unit) : Listener.Item<T> {
-
-        override fun notify(value: T) {
-            if (!host.finished) {
-                host.listenerFunction(value)
-            }
-        }
-    }
-}
-
-//private class ListenerItem<T>(lifecycle: Lifecycle, listenerFunction: (T) -> Unit) : Lifecycle, Listener<T> {
-//
-//    override val finished: Boolean get() {
-//        if (mFinished) return true
-//
-//        val closed = lifecycle!!.closed
-//        if (closed) {
-//            finish()
-//        }
-//
-//        return closed
-//    }
-//
-//    override fun notify(value: T) {
-//        if (!finished) {
-//            listener!!.invoke(value)
-//        }
-//    }
-//
-//    private fun finish() {
-//        mFinished = true
-//        lifecycle = null
-//        listener = null
-//    }
-//
-//    private var mFinished = false
-//
-//    private var lifecycle: Lifecycle? = lifecycle
-//
-//    private var listener: ((T) -> Unit)? = listenerFunction
-//}
 
 class EventDispatcher<T>(override val lifecycle: Lifecycle) : EventSource<T> {
 
@@ -345,10 +192,12 @@ class EventDispatcher<T>(override val lifecycle: Lifecycle) : EventSource<T> {
         listeners.add(listener)
     }
 
+    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
+        listeners.add(lifecycle, listener)
+    }
+
     fun enqueueEvent(eventValue: T) {
-        EventsGlobalCoordinator.dispatch {
-            enqueue(listeners.getNotFinishedListeners(), eventValue)
-        }
+        listeners.enqueueEvent(eventValue)
     }
 
     private val listeners = ListenersRegistry<T>(lifecycle)
@@ -363,6 +212,10 @@ class ValueDispatcher<T> (override val lifecycle: Lifecycle, defaultValue: T) : 
         changeDispatcher.listen(listener)
     }
 
+    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
+        changeDispatcher.listen(lifecycle, listener)
+    }
+
     fun setValueWithEvent(nextValue: T) {
         if (nextValue == value) {
             return
@@ -375,36 +228,63 @@ class ValueDispatcher<T> (override val lifecycle: Lifecycle, defaultValue: T) : 
     private val changeDispatcher =  EventDispatcher<T>(lifecycle)
 }
 
-class ValueUpdater<T>(
-    private val parentLifecycle: Lifecycle,
+class ValueCustomHandler<T>(
+    override val lifecycle: Lifecycle,
     defaultValue: T,
-    private val valueHandler: (nextValue: T, nextValueLifecycle: Lifecycle) -> Unit
-) {
-    var value: T = defaultValue
-        set(value) {
-            if (!updating && value == field) {
-                return
-            }
+    private val handler: Handler<T>
+): Value<T> {
 
-            val nestedUpdate: Boolean = updating
+    interface Handler<T> {
+        val dispatchSameValue: Boolean
+        fun valueMapper(value: T): T
+        fun beforeDispatch(oldValue: T, nextValue: T)
+        fun afterDispatch(oldValue: T, nextValue: T)
+    }
 
-            if (!updating) {
-                updating = true
-                lifecycle.closeImmediately()
-            }
-
-            field = value
-
-            if (!nestedUpdate) {
-                updating = false
-                lifecycle = NestedLifecycle(parentLifecycle)
-                valueHandler(field, lifecycle)
-            }
+    open class CustomHandler<T>(override val dispatchSameValue: Boolean) : Handler<T> {
+        override fun valueMapper(value: T): T {
+            return value
         }
 
-    private var lifecycle = NestedLifecycle(parentLifecycle)
+        override fun beforeDispatch(oldValue: T, nextValue: T) {
+            // empty
+        }
 
-    private var updating: Boolean = false
+        override fun afterDispatch(oldValue: T, nextValue: T) {
+            // empty
+        }
+    }
+
+    override var value: T = defaultValue
+        private set
+
+    fun handle(value: T) {
+        if (lifecycle.finished) {
+            return
+        }
+
+        val nextValue = handler.valueMapper(value)
+
+        if (!handler.dispatchSameValue && nextValue == this.value) {
+            return
+        }
+
+        val oldValue = this.value
+        this.value = nextValue
+        handler.beforeDispatch(oldValue, nextValue)
+        listeners.enqueueEvent(nextValue)
+        handler.afterDispatch(oldValue, nextValue)
+    }
+
+    override fun listen(listener: Listener<T>) {
+        listeners.add(listener)
+    }
+
+    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
+        listeners.add(lifecycle, listener)
+    }
+
+    private val listeners = ListenersRegistry<T>(lifecycle)
 }
 
 class VariableDispatcher<T> (
@@ -697,6 +577,10 @@ object ThreadQueueControl {
         if (mHandler != null) return
         mHandler = handler
     }
+}
+
+interface EventsQueueDispatcher {
+    fun <T> enqueue(lifecycle: Lifecycle, dispatchList: ImmutableList<(T) -> Unit>, valueToDispatch: T)
 }
 
 private object EventsGlobalCoordinator {
