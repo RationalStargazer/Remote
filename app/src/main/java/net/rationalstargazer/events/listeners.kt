@@ -20,14 +20,14 @@ class ListenerSkipWhenInactive<T>(
 
 class ValueConsumer<T> constructor(
     lifecycle: ViewLifecycle,
-    source: Value<T>,
+    source: SignalValue<T>,
     consumeFirstValueImmediately: Boolean,
     handler: (T) -> Unit
 ) {
 
     constructor(
         lifecycle: ViewLifecycle,
-        source: Value<T>,
+        source: SignalValue<T>,
         handler: (T) -> Unit
     ) : this(lifecycle, source, true, handler)
 

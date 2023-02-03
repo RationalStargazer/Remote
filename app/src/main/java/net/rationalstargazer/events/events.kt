@@ -12,28 +12,25 @@ interface EventSource<out T> : HasLifecycle {
     }
 }
 
+interface Value<out T> : EventSource<Unit> {
+    fun checkGeneration(): Long
+    val value: T
+}
+
 /**
  * "Value" is essentially an [EventSource] that holding (or keeping) a value that can be changed over time.
  */
-interface Value<out T> : EventSource<T> {
+interface SignalValue<out T> : EventSource<T> {
 
     val value: T
 
     //fun listenInvalidate(lifecycle: Lifecycle, listener: () -> Unit)
 }
 
-interface ValueCustomConsumer<T> {
-    val oldValue: T
-    val nextValue: T
-    fun set(nextValue: T)
-    fun dispatch()
-    fun setAndDispatch(nextValue: T)
-}
-
 /**
- * "Variable" is writable [Value]
+ * "Variable" is writable [SignalValue]
  */
-interface Variable<T> : Value<T> {
+interface Variable<T> : SignalValue<T> {
 
     override var value: T
 }
@@ -54,16 +51,29 @@ interface HasLifecycle {
 // }
 
 interface Lifecycle {
-
+    //TODO: maybe (?) it is important to ensure that after lifecycle is consumed subsequent listenBeforeFinish will still
+    // be called before listenFinished (event if they will be added after lifecycle was consumed and listenFinish will be added before
+    // listenBeforeFinish)
     val coordinator: EventsQueueDispatcher
 
     val finished: Boolean
 
-    fun listen(listener: Listener<Unit>)
+    val consumed: Boolean
 
-    fun listen(listenerLifecycle: Lifecycle, listener: () -> Unit) {
-        listen(StdListener(listenerLifecycle) { listener() })
+    //TODO: IMPORTANT TO DO NOT USE STANDARD ListenerRegistry, because it will not dispatch after lifecycle is finished
+
+    //TODO: ALSO IT IS IMPORTANT TO NOTE THAT IF (callIfAlreadyConsumed == true) then call should be made even if **listenerLifecycle** is after correspondent state (finished or consumed)
+    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listener: Listener<Unit>) {
+        listenBeforeFinish(callIfAlreadyFinished, listener.lifecycle, listener::notify)
     }
+
+    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listener: (Unit) -> Unit)
+
+    fun listenFinished(callIfAlreadyConsumed: Boolean, listener: Listener<Unit>) {
+        listenFinished(callIfAlreadyConsumed, listener.lifecycle, listener::notify)
+    }
+
+    fun listenFinished(callIfAlreadyConsumed: Boolean, listenerLifecycle: Lifecycle, listener: (Unit) -> Unit)
 }
 
 interface SuspendableLifecycle {
@@ -163,14 +173,10 @@ class ListenersRegistry<T>(
     private val commonItems: Deque<(T) -> Unit> = LinkedList()
     private val otherLifecyclesItems: MutableMap<Lifecycle, ListenersRegistry<T>> = mutableMapOf()
 
-    private fun close() {
-        commonItems.clear()
-        otherLifecyclesItems.clear()
-    }
-
     init {
-        if (!registryLifecycle.finished) {
-            registryLifecycle.listen(registryLifecycle, ::close)
+        registryLifecycle.listenFinished(true, registryLifecycle) {
+            commonItems.clear()
+            otherLifecyclesItems.clear()
         }
     }
 }
@@ -203,77 +209,261 @@ class EventDispatcher<T>(override val lifecycle: Lifecycle) : EventSource<T> {
     private val listeners = ListenersRegistry<T>(lifecycle)
 }
 
-class ValueDispatcher<T> (override val lifecycle: Lifecycle, defaultValue: T) : Value<T> {
+class FunctionalValue<T>(
+    override val lifecycle: Lifecycle,
+    valueGeneration: () -> Long,
+    function: () -> T
+) : Value<T> {
 
-    override var value: T = defaultValue
-        private set
+    // object EventBased {
+    //     fun <T> create(
+    //         lifecycle: Lifecycle,
+    //         changeEventSource: EventSource<Any>,
+    //         valueGeneration: () -> Long,
+    //         function: () -> T
+    //     ): FunctionalValue<T> {
+    //         val r = FunctionalValue<T>(lifecycle, valueGeneration, function)
+    //         changeEventSource.listen(lifecycle) { r.notifyChanged() }
+    //         if (changeEventSource.lifecycle != lifecycle) {
+    //             changeEventSource.lifecycle.listenBeforeFinish(true, lifecycle) {
+    //                 //TODO: actually source functions should be released here
+    //                 r.value  // read value to create cache
+    //             }
+    //         }
+    //
+    //         return r
+    //     }
+    //
+    //     fun <T> create(
+    //         lifecycle: Lifecycle,  //TODO: maybe also add default union lifecycle?
+    //         changeSources: List<EventSource<Any>>,
+    //         valueGeneration: () -> Long,
+    //         function: () -> T
+    //     ): FunctionalValue<T> {
+    //         val item = FunctionalValue<T>(lifecycle, valueGeneration, function)
+    //         changeSources.forEach {
+    //             it.listen(lifecycle) { item.notifyChanged() }
+    //         }
+    //
+    //         return item
+    //     }
+    // }
 
-    override fun listen(listener: Listener<T>) {
-        changeDispatcher.listen(listener)
+    override fun checkGeneration(): Long {
+        return generation?.invoke()
+            ?: cachedGeneration!!  // cachedGeneration created before generation reference is cleared
     }
 
-    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
-        changeDispatcher.listen(lifecycle, listener)
-    }
+    override val value: T
+        get() {
+            val g = checkGeneration()
+            if (g == cachedGeneration) {
+                return cache!!.value  // g != null => cachedGeneration != null => cache exists
+            }
 
-    fun setValueWithEvent(nextValue: T) {
-        if (nextValue == value) {
-            return
+            val r = function!!.invoke()
+
+            val c = cache
+            if (c != null) {
+                c.value = r
+            } else {
+                cache = Cache(r)
+            }
+
+            cachedGeneration = g
+
+            return r
         }
 
-        value = nextValue
-        changeDispatcher.enqueueEvent(nextValue)
+    fun notifyChanged() {
+        listeners.enqueueEvent(Unit)
     }
 
-    private val changeDispatcher =  EventDispatcher<T>(lifecycle)
+    override fun listen(listener: Listener<Unit>) {
+        listeners.add(listener)
+    }
+
+    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: Unit) -> Unit) {
+        listeners.add(lifecycle, listener)
+    }
+
+    private var function: (() -> T)? = function
+    private var generation: (() -> Long)? = valueGeneration
+
+    private val listeners = ListenersRegistry<Unit>(lifecycle)
+    private var cache: Cache<T>? = null
+    private var cachedGeneration: Long? = null
+
+    class Cache<T>(var value: T)
+
+    init {
+        lifecycle.listenBeforeFinish(true, lifecycle) {
+            if (cachedGeneration == null) {
+                val v = value  // reading to create cache
+            }
+        }
+
+        lifecycle.listenFinished(true, lifecycle) {
+            generation = null
+            this.function = null
+        }
+    }
 }
 
-class ValueCustomHandler<T>(
-    override val lifecycle: Lifecycle,
-    defaultValue: T,
-    private val handler: Handler<T>
-): Value<T> {
+class ChainGenericItem<T>(private val base: FunctionalValue<T>) : Value<T> by base {
 
-    interface Handler<T> {
-        val dispatchSameValue: Boolean
-        fun valueMapper(value: T): T
-        fun beforeDispatch(oldValue: T, nextValue: T)
-        fun afterDispatch(oldValue: T, nextValue: T)
+    constructor(
+        lifecycle: Lifecycle,
+        upstreamChangeSource: EventSource<Any>,
+        valueGeneration: () -> Long,
+        function: () -> T
+    ) : this(
+        FunctionalValue(combineLifecycles(lifecycle, upstreamChangeSource.lifecycle), valueGeneration, function)
+    ) {
+        upstreamChangeSource.listen(lifecycle, this::notifyChanged)
     }
 
-    open class CustomHandler<T>(override val dispatchSameValue: Boolean) : Handler<T> {
-        override fun valueMapper(value: T): T {
-            return value
+    constructor(
+        lifecycle: Lifecycle,
+        upstreamSources: List<EventSource<Any>>,
+        valueGeneration: () -> Long,
+        function: () -> T
+    ) : this(
+        FunctionalValue(combineLifecycles(lifecycle, combineSources(upstreamSources)), valueGeneration, function)
+    ) {
+        upstreamSources.forEach {
+            it.listen(lifecycle, this::notifyChanged)
+        }
+    }
+
+    companion object {
+        private fun combineLifecycles(vararg lifecycles: Lifecycle): Lifecycle {
+
         }
 
-        override fun beforeDispatch(oldValue: T, nextValue: T) {
-            // empty
+        private fun combineSources(sources: List<EventSource<Any>>): Lifecycle {
+
+        }
+    }
+
+    private fun notifyChanged(any: Any) {
+        base.notifyChanged()
+    }
+}
+
+class ValueMapper<V, V0> private constructor(
+    private val base: ChainGenericItem<V>
+) : Value<V> by base {
+
+    constructor(
+        lifecycle: Lifecycle,
+        source: Value<V0>,
+        mapper: (V0) -> V
+    ) : this(
+        ChainGenericItem(
+            lifecycle,
+            source,
+            source::checkGeneration,
+        ) {
+            mapper(source.value)
+        }
+    )
+}
+
+class VariableDispatcher<T> private constructor(
+    private val handler: ValueGenericConsumer<T>
+) : SignalValue<T> by handler, Variable<T> {
+
+    constructor(
+        lifecycle: Lifecycle,
+        defaultValue: T,
+        handler: (ValueGenericConsumer.Dispatcher<T>) -> Unit
+    ) : this(
+        ValueGenericConsumer(
+            lifecycle,
+            defaultValue,
+            skipSameValue = true,
+            assignValueImmediately = true,
+            assignValueWhenFinished = true,
+            handler = handler
+        )
+    )
+
+    override var value: T
+        get() {
+            return handler.value
         }
 
-        override fun afterDispatch(oldValue: T, nextValue: T) {
-            // empty
+        set(value) {
+            handler.set(value)
+        }
+}
+
+class ValueGenericConsumer<T>(
+    override val lifecycle: Lifecycle,
+    defaultValue: T,
+    private val skipSameValue: Boolean,
+    private val assignValueImmediately: Boolean,
+    private val assignValueWhenFinished: Boolean,
+    private val handler: (Dispatcher<T>) -> Unit
+): SignalValue<T> {
+
+    interface Dispatcher<T> {
+        val prevValue: T
+        val valueAtTimeOfChange: T
+        fun dispatch()
+    }
+
+    private class DispatcherImpl<T>(
+        private val listeners: ListenersRegistry<T>,
+        override val prevValue: T,
+        override val valueAtTimeOfChange: T
+    ) : Dispatcher<T> {
+
+        var dispatched: Boolean = false
+            private set
+
+        override fun dispatch() {
+            if (dispatched) {
+                return
+            }
+
+            dispatched = true
+
+            listeners.enqueueEvent(valueAtTimeOfChange)
         }
     }
 
     override var value: T = defaultValue
         private set
 
-    fun handle(value: T) {
-        if (lifecycle.finished) {
+    fun set(value: T) {
+        if (lifecycle.finished && !assignValueWhenFinished) {
             return
         }
 
-        val nextValue = handler.valueMapper(value)
-
-        if (!handler.dispatchSameValue && nextValue == this.value) {
+        if (skipSameValue && value == this.value) {
             return
         }
 
-        val oldValue = this.value
-        this.value = nextValue
-        handler.beforeDispatch(oldValue, nextValue)
-        listeners.enqueueEvent(nextValue)
-        handler.afterDispatch(oldValue, nextValue)
+        val dispatcher = DispatcherImpl(listeners, this.value, value)
+
+        if (assignValueImmediately) {
+            this.value = value
+        }
+
+        if (consumeInProgress) {
+            consumeQueue.add(dispatcher)
+        } else {
+            consumeInProgress = true
+            handleItem(dispatcher)
+
+            while (consumeQueue.isNotEmpty()) {
+                handleItem(consumeQueue.removeFirst())
+            }
+
+            consumeInProgress = false
+        }
     }
 
     override fun listen(listener: Listener<T>) {
@@ -285,106 +475,23 @@ class ValueCustomHandler<T>(
     }
 
     private val listeners = ListenersRegistry<T>(lifecycle)
-}
+    private var consumeInProgress: Boolean = false
+    private val consumeQueue: MutableList<Dispatcher<T>> = mutableListOf()
 
-class VariableDispatcher<T> (
-    override val lifecycle: Lifecycle,
-    defaultValue: T,
-    changeHandler: (ValueChangeDispatcher, oldValue: T, nextValue: T) -> Unit
-): Variable<T> {
-
-    class ValueChangeDispatcher(private val dispatchLogic: () -> Unit) {
-
-        var enqueued: Boolean = false
-            private set
-
-        fun enqueueDispatch() {
-            if (enqueued) {
-                return
+    private fun handleItem(dispatcher: Dispatcher<T>) {
+        if (!lifecycle.finished) {
+            if (!assignValueImmediately) {
+                value = dispatcher.valueAtTimeOfChange
             }
 
-            enqueued = true
-            dispatchLogic()
-        }
-    }
-
-    override var value: T get() = mValue
-        set(value) {
-            setValueWithEvent(value)
-        }
-
-    private var mValue: T = defaultValue
-
-    private val changeDispatcher = EventDispatcher<T>(lifecycle)
-
-    override fun listen(listener: Listener<T>) {
-        changeDispatcher.listen(listener)
-    }
-
-    fun setValueWithEvent(nextValue: T) {
-        if (nextValue == value) {
-            return
-        }
-
-        val oldValue = mValue
-        mValue = nextValue
-
-        val vd = ValueChangeDispatcher {
-            changeDispatcher.enqueueEvent(nextValue)
-        }
-
-        changeHandler?.invoke(vd, oldValue, nextValue)
-
-        if (!vd.enqueued) {
-            vd.enqueueDispatch()
-        }
-    }
-
-    private var changeHandler: ((ValueChangeDispatcher, oldValue: T, nextValue: T) -> Unit)? = changeHandler
-
-    init {
-        lifecycle.listenCloseImmediately(Lifecycle.Forever, true) {
-            this.changeHandler = null
-        }
-    }
-}
-
-class ValueTransform<T, R>(parentLifecycle: Lifecycle, source: Value<T>, transformHandler: (T) -> R) : Value<R> {
-
-    override val value: R get() {
-        return sourceData?.let { it.transformer(it.source.value) } ?: lastDispatchedValue
-    }
-
-    override fun listen(listener: Listener<R>) {
-        changeDispatcher.listen(listener)
-    }
-
-    override val lifecycle: Lifecycle = LifecyclesIntersection(parentLifecycle, source.lifecycle).also {
-        it.listenCloseImmediately(Lifecycle.Forever, true) {
-            lastDispatchedValue = value
-            sourceData = null
-        }
-    }
-
-    private val changeDispatcher = EventDispatcher<R>(lifecycle)
-
-    private var sourceData: Source<T, R>? = Source(source, transformHandler)
-
-    private var lastDispatchedValue: R = value
-
-    init {
-        source.listen(lifecycle) {
-            sourceData?.let { // when listener is calling -> lifecycle.closed == false -> sourceData != null
-                val next = it.transformer(it.source.value)
-                if (next != lastDispatchedValue) {
-                    lastDispatchedValue = next
-                    changeDispatcher.enqueueEvent(next)
-                }
+            handler(dispatcher)
+            dispatcher.dispatch()
+        } else {
+            if (!assignValueImmediately && assignValueWhenFinished) {
+                value = dispatcher.valueAtTimeOfChange
             }
         }
     }
-
-    private class Source<T, R>(val source: Value<T>, val transformer: (T) -> R)
 }
 
 abstract class ConditionalLifecycle : Lifecycle {
