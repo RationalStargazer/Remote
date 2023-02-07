@@ -64,11 +64,26 @@ interface Lifecycle {
 
     fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: (Unit) -> Unit)
 
+    //TODO: maybe removeListener will be implemented and at that time it will be important to keep exact function
+    //(not wrap them by convinient function)
+    // fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: () -> Unit) {
+    //     listenBeforeFinish(callIfAlreadyFinished, listenerLifecycle) { _ ->
+    //         listenerFunction()
+    //     }
+    // }
+
     fun listenFinished(callIfAlreadyFinished: Boolean, listener: Listener<Unit>) {
         listenFinished(callIfAlreadyFinished, listener.lifecycle, listener::notify)
     }
 
     fun listenFinished(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: (Unit) -> Unit)
+
+    //TODO: maybe removeListener will be implemented and at that time it will be important to keep exact function
+    // fun listenFinished(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: () -> Unit) {
+    //     listenFinished(callIfAlreadyFinished, listenerLifecycle) { _ ->
+    //         listenerFunction()
+    //     }
+    // }
 
     fun watch(lifecycle: Lifecycle)
 }
@@ -92,7 +107,8 @@ interface ControlledLifecycle : Lifecycle {
 
     fun close()
 
-    fun close(onConsumed: () -> Unit)
+    // TODO: not implemented yet
+    //fun close(onConsumed: () -> Unit)
 }
 
 interface Listener<in T> {
@@ -309,29 +325,29 @@ class ChainGenericItem<T>(private val base: FunctionalValue<T>) : Value<T> by ba
         valueGeneration: () -> Long,
         function: () -> T
     ) : this(
-        FunctionalValue(combineLifecycles(lifecycle, upstreamChangeSource.lifecycle), valueGeneration, function)
+        FunctionalValue(
+            IntersectionLifecycle.get(lifecycle.coordinator, immutableListOf(lifecycle, upstreamChangeSource.lifecycle)),
+            valueGeneration,
+            function
+        )
     ) {
         upstreamChangeSource.listen(lifecycle, this::notifyChanged)
     }
 
-    constructor(
-        lifecycle: Lifecycle,
-        upstreamSources: List<EventSource<Any>>,
-        valueGeneration: () -> Long,
-        function: () -> T
-    ) : this(
-        FunctionalValue(combineLifecycles(lifecycle, combineSources(upstreamSources)), valueGeneration, function)
-    ) {
-        upstreamSources.forEach {
-            it.listen(lifecycle, this::notifyChanged)
-        }
-    }
+    // constructor(
+    //     lifecycle: Lifecycle,
+    //     upstreamSources: List<EventSource<Any>>,
+    //     valueGeneration: () -> Long,
+    //     function: () -> T
+    // ) : this(
+    //     FunctionalValue(combineLifecycles(lifecycle, combineSources(upstreamSources)), valueGeneration, function)
+    // ) {
+    //     upstreamSources.forEach {
+    //         it.listen(lifecycle, this::notifyChanged)
+    //     }
+    // }
 
     companion object {
-        private fun combineLifecycles(vararg lifecycles: Lifecycle): Lifecycle {
-
-        }
-
         private fun combineSources(sources: List<EventSource<Any>>): Lifecycle {
 
         }
@@ -483,6 +499,64 @@ class ValueGenericConsumer<T>(
 
 class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : ControlledLifecycle {
 
+    class Finished(override val coordinator: EventsQueueDispatcher) : ControlledLifecycle {
+
+        override val finished: Boolean = true
+
+        override val consumed: Boolean = true
+
+        override fun listenBeforeFinish(
+            callIfAlreadyFinished: Boolean,
+            listenerLifecycle: Lifecycle,
+            listenerFunction: (Unit) -> Unit
+        ) {
+            if (callIfAlreadyFinished) {
+                beforeFinishRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
+                coordinator.enqueueB(this::handleTail, Unit)
+            }
+        }
+
+        override fun listenFinished(
+            callIfAlreadyFinished: Boolean,
+            listenerLifecycle: Lifecycle,
+            listenerFunction: (Unit) -> Unit
+        ) {
+            if (callIfAlreadyFinished) {
+                finishedRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
+                coordinator.enqueueB(this::handleTail, Unit)
+            }
+        }
+
+        override fun watch(lifecycle: Lifecycle) {
+            // do nothing
+        }
+
+        override fun close() {
+            // do nothing
+        }
+
+        private fun handleTail() {
+            handleTail(Unit)
+        }
+
+        private fun handleTail(any: Unit) {
+            val beforeFinishedListeners = beforeFinishRegistry.allListeners()
+            if (beforeFinishedListeners.isNotEmpty()) {
+                beforeFinishRegistry.clearMainAndOthers()
+                coordinator.enqueueB(beforeFinishedListeners, Unit, this::handleTail)
+            } else {
+                val finalListeners = finishedRegistry.allListeners()
+                if (finalListeners.isNotEmpty()) {
+                    finishedRegistry.clearMainAndOthers()
+                    coordinator.enqueueB(finalListeners, Unit, this::handleTail)
+                }
+            }
+        }
+
+        private val beforeFinishRegistry = ManualRegistry<Unit>(this)
+        private val finishedRegistry = ManualRegistry<Unit>(this)
+    }
+
     var closeCalled: Boolean = false
         private set
 
@@ -540,9 +614,9 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         startClose(null)
     }
 
-    override fun close(onConsumed: () -> Unit) {
-        startClose(onConsumed)
-    }
+    // override fun close(onConsumed: () -> Unit) {
+    //     startClose(onConsumed)
+    // }
 
     override fun watch(lifecycle: Lifecycle) {
         if (consumed) {
@@ -570,7 +644,9 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
     private fun startClose(onConsumed: (() -> Unit)?) {
         if (closeCalled) {
             if (onConsumed != null) {
-                //TODO: improved logging here
+                //TODO: handle the case:
+                // 1. several calls of `close(onConsumed)` from different places, handlers should be added to list and dispatched after the close
+                // 2. subsequent calls of close should enqueue onConsumed
             }
 
             return
@@ -692,197 +768,44 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
     }
 }
 
-abstract class ConditionalLifecycle : Lifecycle {
-
-    final override val closed: Boolean get() {
-        val v = closeCondition?.invoke()
-
-        return when (v) {
-            null -> true
-
-            true -> {
-                closeCondition = null
-                true
-            }
-
-            else -> false
-        }
-    }
-
-    final override var finished: Boolean = false
-        private set
-
-    /**
-     * closeCondition Contracts:
-     * - Returns appropriate closed state at the time of calling
-     * - No state changes, no losing of control
-     * - Implementation doesn't use: this.closed
-     */
-    protected abstract var closeCondition: (() -> Boolean)?
-
-    override fun listenCloseImmediately(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-        if (closed) {
-            if (callIfAlreadyClosed) {
-                listener.notify(true)
-            }
+class NestedLifecycle private constructor(private val base: ControlledLifecycle) : ControlledLifecycle by base {
+    
+    constructor(outerLifecycle: Lifecycle) : this(
+        if (outerLifecycle.finished) {
+            LifecycleDispatcher.Finished(outerLifecycle.coordinator)
         } else {
-            immediateListeners.add(listener)
+            LifecycleDispatcher(outerLifecycle.coordinator)
         }
-    }
-
-    final override fun listenCloseStreamlined(callIfAlreadyClosed: Boolean, listener: Listener<Boolean>) {
-        if (closed) {
-            if (callIfAlreadyClosed && !listener.finished) {
-                events {
-                    enqueueDirectCall {
-                        listener.notify(true)
-                    }
-                }
+    ) {
+        if (!outerLifecycle.finished) {
+            outerLifecycle.listenBeforeFinish(true, base) {
+                base.close()
             }
-        } else {
-            streamlinedListeners.add(listener)
         }
     }
+}
 
-    protected fun initiateClose() {
-        if (closeHasCalled) return
-        closeHasCalled = true
-        closeCondition = null
+object IntersectionLifecycle {
 
-        streamlinedListeners.getNotFinishedListeners().let { list ->
-            if (list.isNotEmpty()) {
-                events {
-                    enqueueDirectCall {
-                        list.forEach { it.notify(false) }
-                        finished = true
-                        untilFinishedLifecycle?.closeImmediately()
-                    }
-                }
+    fun get(coordinator: EventsQueueDispatcher, lifecycles: ImmutableList<Lifecycle>): Lifecycle {
+        if (lifecycles.isEmpty() || lifecycles.any { it.finished }) {
+            return LifecycleDispatcher.Finished(coordinator)
+        }
+
+        val first = lifecycles[0]
+
+        if (lifecycles.all { it == first }) {
+            return first
+        }
+
+        val dispatcher = LifecycleDispatcher(coordinator)
+        lifecycles.forEach {
+            it.listenBeforeFinish(true, dispatcher) {
+                dispatcher.close()
             }
         }
 
-        immediateListeners.getNotFinishedListeners().let { sourceList ->
-            val copy = sourceList.toList()
-            copy.forEach { it.notify(false) }
-        }
-    }
-
-    protected val untilFinished: Lifecycle get() {
-        return untilFinishedLifecycle ?: run {
-            val d = LifecycleDispatcher()
-            if (finished) d.closeImmediately()
-
-            untilFinishedLifecycle = d
-            d
-        }
-    }
-
-    private var untilFinishedLifecycle: LifecycleDispatcher? = null
-
-    private var closeHasCalled = false
-
-    @Suppress("LeakingThis")
-    private val immediateListeners = ListenersRegistry<Boolean>(this, true)
-
-    @Suppress("LeakingThis")
-    private val streamlinedListeners = ListenersRegistry<Boolean>(this, true)
-}
-
-class SuspendableLifecycleDispatcher : ConditionalLifecycle(), SuspendableLifecycle {
-
-    override var active: Boolean = false
-        private set
-
-    fun setActiveWithEvent(value: Boolean) {
-        if (closed) return
-        if (value == active) return
-
-        active = value
-        stateChangeDispatcher.enqueueEvent(
-            if (value) SuspendableLifecycle.State.Active else SuspendableLifecycle.State.Inactive
-        )
-    }
-
-    fun closeImmediately() {
-        if (closed) {
-            return
-        }
-
-        if (active) {
-            setActiveWithEvent(false)
-        }
-
-        stateChangeDispatcher.enqueueEvent(SuspendableLifecycle.State.Closed)
-        initiateClose()
-    }
-
-    override fun listenStateChange(listener: Listener<SuspendableLifecycle.State>) {
-        stateChangeDispatcher.listen(listener)
-    }
-
-    override var closeCondition: (() -> Boolean)? = { false }
-
-    private val stateChangeDispatcher = EventDispatcher<SuspendableLifecycle.State>(this)
-}
-
-class NestedLifecycle(outerLifecycle: Lifecycle) : ConditionalLifecycle(), ControlledLifecycle {
-
-    override var closeCondition: (() -> Boolean)? = {
-        outerLifecycle.closed
-    }
-
-    override fun closeImmediately() {
-        initiateClose()
-    }
-
-    init {
-        outerLifecycle.listenCloseImmediately(untilFinished, true) {
-            closeImmediately()
-        }
-    }
-}
-
-// class LifecyclesIntersection(vararg lifecycles: Lifecycle) : Lifecycle {
-//     override val coordinator: EventsQueueDispatcher
-//         get() = TODO("Not yet implemented")
-//
-//     override val finished: Boolean
-//         get() = TODO("Not yet implemented")
-//
-//     override val consumed: Boolean
-//         get() = TODO("Not yet implemented")
-//
-//     override fun listenBeforeFinish(
-//         callIfAlreadyFinished: Boolean,
-//         listenerLifecycle: Lifecycle,
-//         listener: (Unit) -> Unit
-//     ) {
-//         TODO("Not yet implemented")
-//     }
-//
-//     override fun listenFinished(
-//         callIfAlreadyConsumed: Boolean,
-//         listenerLifecycle: Lifecycle,
-//         listener: (Unit) -> Unit
-//     ) {
-//         TODO("Not yet implemented")
-//     }
-// }
-
-class LifecyclesIntersection(lifecycleA: Lifecycle, lifecycleB: Lifecycle) : ConditionalLifecycle() {
-
-    override var closeCondition: (() -> Boolean)? = {
-        lifecycleA.closed || lifecycleB.closed
-    }
-
-    init {
-        lifecycleA.listenCloseImmediately(untilFinished, true) {
-            initiateClose()
-        }
-
-        lifecycleB.listenCloseImmediately(untilFinished, true) {
-            initiateClose()
-        }
+        return dispatcher
     }
 }
 
