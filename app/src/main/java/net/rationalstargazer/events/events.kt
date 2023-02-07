@@ -157,7 +157,7 @@ class ListenersRegistry<T>(
             return
         }
 
-        registryLifecycle.coordinator.enqueue(listeners(), eventValue)
+        registryLifecycle.coordinator.enqueueB(listeners(), eventValue)
     }
 
     private fun listeners(): ImmutableList<(T) -> Unit> {
@@ -500,7 +500,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         if (finished) {
             if (callIfAlreadyFinished) {
                 beforeFinishRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
-                coordinator.enqueue(this::handleLateListeners, Unit)
+                coordinator.enqueueB(this::handleTail, Unit)
             }
 
             return
@@ -522,7 +522,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         if (finished) {
             if (callIfAlreadyFinished) {
                 finishedRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
-                coordinator.enqueue(this::handleLateListeners, Unit)
+                coordinator.enqueueB(this::handleTail, Unit)
             }
 
             return
@@ -569,6 +569,10 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
 
     private fun startClose(onConsumed: (() -> Unit)?) {
         if (closeCalled) {
+            if (onConsumed != null) {
+                //TODO: improved logging here
+            }
+
             return
         }
 
@@ -586,25 +590,25 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
             }
         }
 
-        handleTail(onConsumed)
+        coordinator.enqueueB(this::handleTail, Unit, onConsumed)
     }
 
-    private fun handleTail(onConsumed: (() -> Unit)?) {
-        TODO("incorrect, should be recursively executed in single command")
+    private fun handleTail(any: Unit) {
+        handleTail()
+    }
 
+    private fun handleTail() {
         val beforeFinishedListeners = beforeFinishRegistry.allListeners()
         if (beforeFinishedListeners.isNotEmpty()) {
             beforeFinishRegistry.clearMainAndOthers()
-            coordinator.enqueue(beforeFinishedListeners, Unit)
-            coordinator.enqueue(immutableListOf({ handleTail(onConsumed) }), Unit)
+            coordinator.enqueueB(beforeFinishedListeners, Unit, this::handleTail)
         } else {
             finished = true
 
             val finalListeners = finishedRegistry.allListeners()
             if (finalListeners.isNotEmpty()) {
                 finishedRegistry.clearMainAndOthers()
-                coordinator.enqueue(finalListeners, Unit)
-                coordinator.enqueue(immutableListOf({ handleTail(onConsumed) }), Unit)
+                coordinator.enqueueB(finalListeners, Unit, this::handleTail)
             } else {
                 if (!consumed) {
                     consumed = true
@@ -615,15 +619,9 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
                     lifecycles.forEach {
                         it.watch(this)
                     }
-
-                    onConsumed?.invoke()
                 }
             }
         }
-    }
-
-    private fun handleLateListeners(any: Unit) {
-        handleTail(null)
     }
 
     private val beforeFinishRegistry = ManualRegistry<Unit>(this)
@@ -905,9 +903,9 @@ object ThreadQueueControl {
 }
 
 interface EventsQueueDispatcher {
-    fun <T> enqueue(block: (T) -> Unit, valueToDispatch: T)
-    fun <T> enqueue(dispatchList: ImmutableList<(T) -> Unit>, valueToDispatch: T)
-    fun <T> enqueue(dispatchList: ImmutableList<(T) -> Unit>, valueToDispatch: T, onDispatched: () -> Unit)
+    //TODO: in case of simultaneous afterHandled (from different calls) they should should be stacked (first in last out)
+    fun <T> enqueueB(block: (T) -> Unit, valueToDispatch: T, afterHandled: (() -> Unit)? = null)
+    fun <T> enqueueB(dispatchList: ImmutableList<(T) -> Unit>, valueToDispatch: T, afterHandled: (() -> Unit)? = null)
 }
 
 private object EventsGlobalCoordinator {
