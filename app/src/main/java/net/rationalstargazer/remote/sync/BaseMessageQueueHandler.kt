@@ -3,20 +3,26 @@ package net.rationalstargazer.remote.sync
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import net.rationalstargazer.events.Lifecycle
+import net.rationalstargazer.events.Value
+import net.rationalstargazer.events.ValueDispatcher
 import net.rationalstargazer.simpleevent.SimpleDataSource
-import net.rationalstargazer.simpleevent.SimpleDynamicDataRawImpl
 import kotlin.coroutines.CoroutineContext
 
 typealias QueuedMessages<Message> = SimpleDataSource<EnumeratedMessageQueue<Message>>
-typealias MessagesAcceptor<Message> = (List<IdContainer<Message>>) -> Unit
+//typealias MessagesConsumer<Message> = (List<IdContainer<Message>>) -> Unit
 
 abstract class BaseMessageQueueHandlerImpl<Message>(
-    lifecycle: Any,  //TODO: lifecycle currently ignored
+    lifecycle: Lifecycle,  //TODO: change to something like CoroutineLifecycle
     queueContext: CoroutineContext
 ) : BaseMessageQueueHandler<Message> {
-    private val _messages = SimpleDynamicDataRawImpl<EnumeratedMessageQueue<Message>>(EnumeratedMessageQueue(null, emptyList()))
 
-    final override val messages: SimpleDataSource<EnumeratedMessageQueue<Message>> = _messages
+    private val _messages = ValueDispatcher<EnumeratedMessageQueue<Message>>(
+        lifecycle,
+        EnumeratedMessageQueue(null, emptyList())
+    )
+
+    val messages: Value<EnumeratedMessageQueue<Message>> = _messages
 
     override fun add(message: Message): Id {
         val newMessage = IdContainer(ids.newId(), message)
@@ -49,7 +55,7 @@ abstract class BaseMessageQueueHandlerImpl<Message>(
     private val channel = Channel<Unit>(Channel.CONFLATED)
 
     protected open suspend fun startHandling() {
-        while(messages.value.waiting.isNotEmpty()) {
+        while(_messages.value.waiting.isNotEmpty()) {
             val current = handleBeforeNextMessage()
 
             //TODO: still a bit messy because stub event system is used.
@@ -69,8 +75,8 @@ abstract class BaseMessageQueueHandlerImpl<Message>(
 
     //TODO: still a bit messy about what exactly should be return result and how to work with dynamic properties
     protected open suspend fun handleBeforeNextMessage(): IdContainer<Message>? {
-        val nextMessage = messages.value.waiting.firstOrNull()
-        _messages.value = EnumeratedMessageQueue(nextMessage, messages.value.waiting.drop(1))
+        val nextMessage = _messages.value.waiting.firstOrNull()
+        _messages.value = EnumeratedMessageQueue(nextMessage, _messages.value.waiting.drop(1))
         return nextMessage
     }
 

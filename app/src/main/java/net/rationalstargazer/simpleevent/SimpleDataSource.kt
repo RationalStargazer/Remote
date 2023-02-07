@@ -7,9 +7,9 @@ interface SimpleDataSource<T> {
     fun removeListener(listener: (/*valueAtTimeOfChange*/ T) -> Unit)
 }
 
-interface SimpleDynamicData<T> : SimpleDataSource<T> {
-    override var value: T
-}
+// interface SimpleDynamicData<T> : SimpleDataSource<T> {
+//     override var value: T
+// }
 
 class SimpleDynamicDataRawImpl<T>(defaultValue: T) : SimpleDataSource<T> {
 

@@ -322,7 +322,7 @@ data class EnumeratedMessageQueue<Message>(val active: IdContainer<Message>?, va
 }
 
 interface BaseMessageQueueHandler<Message> {
-    val messages: SimpleDataSource<EnumeratedMessageQueue<Message>>
+    //val messages: SimpleDataSource<EnumeratedMessageQueue<Message>>
 
     fun add(message: Message): Id
     fun remove(messageId: Id)

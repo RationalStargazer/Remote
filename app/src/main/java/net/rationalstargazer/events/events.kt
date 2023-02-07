@@ -3,6 +3,7 @@ package net.rationalstargazer.events
 import net.rationalstargazer.ImmutableList
 import net.rationalstargazer.considerImmutable
 import net.rationalstargazer.immutableListOf
+import net.rationalstargazer.simpleevent.SimpleDataSource
 
 interface EventSource<out T> : HasLifecycle {
 
@@ -10,31 +11,46 @@ interface EventSource<out T> : HasLifecycle {
         listen(listener.lifecycle, listener::notify)
     }
 
-    fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit)
+    fun listen(lifecycle: Lifecycle, listener: (eventData: T) -> Unit)
 }
 
+//TODO: DRAFT
+// interface SimpleEventSource : HasLifecycle {
+//
+//     fun listen(listener: Listener<Any>) {
+//         listen(listener.lifecycle, listener::notify)
+//     }
+//
+//     fun listen(lifecycle: Lifecycle, listener: () -> Unit)
+// }
+//
+// interface DraftValue<out T> : SimpleEventSource {
+//     fun checkGeneration(): Long
+//     val value: T
+// }
+//
+// interface DraftSignalValue<out T> : EventSource<Unit>, SimpleEventSource
+
+/**
+ * `Value` is essentially an [EventSource] that holding (or keeping) a value that can be changed over time.
+ */
 interface Value<out T> : EventSource<Unit> {
     fun checkGeneration(): Long
     val value: T
 }
 
-/**
- * "Value" is essentially an [EventSource] that holding (or keeping) a value that can be changed over time.
- */
-interface SignalValue<out T> : EventSource<T> {
-
-    val value: T
-
-    //fun listenInvalidate(lifecycle: Lifecycle, listener: () -> Unit)
-}
+// interface SignalValue<out T> : EventSource<T> {
+//
+//     val value: T
+// }
 
 /**
- * "Variable" is writable [SignalValue]
+ * `SignalVariable` is writable [SignalValue]
  */
-interface Variable<T> : SignalValue<T> {
-
-    override var value: T
-}
+// interface SignalVariable<T> : SignalValue<T> {
+//
+//     override var value: T
+// }
 
 interface HasLifecycle {
     val lifecycle: Lifecycle
@@ -173,7 +189,7 @@ class ListenersRegistry<T>(
             return
         }
 
-        registryLifecycle.coordinator.enqueueB(listeners(), eventValue)
+        registryLifecycle.coordinator.enqueue(listeners(), eventValue)
     }
 
     private fun listeners(): ImmutableList<(T) -> Unit> {
@@ -209,7 +225,7 @@ private class StdListener<T>(
 
 class EventDispatcher<T>(override val lifecycle: Lifecycle) : EventSource<T> {
 
-    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
+    override fun listen(lifecycle: Lifecycle, listener: (eventData: T) -> Unit) {
         listeners.add(lifecycle, listener)
     }
 
@@ -290,7 +306,7 @@ class FunctionalValue<T>(
         listeners.enqueueEvent(Unit)
     }
 
-    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: Unit) -> Unit) {
+    override fun listen(lifecycle: Lifecycle, listener: (eventData: Unit) -> Unit) {
         listeners.add(lifecycle, listener)
     }
 
@@ -377,14 +393,14 @@ class ValueMapper<V, V0> private constructor(
     )
 }
 
-class VariableDispatcher<T> private constructor(
+class ValueDispatcher<T> private constructor(
     private val handler: ValueGenericConsumer<T>
-) : SignalValue<T> by handler, Variable<T> {
+) : Value<T> by handler {
 
     constructor(
         lifecycle: Lifecycle,
         defaultValue: T,
-        handler: (ValueGenericConsumer.Dispatcher<T>) -> Unit
+        handler: (ValueGenericConsumer.Dispatcher<T>) -> Unit = {}
     ) : this(
         ValueGenericConsumer(
             lifecycle,
@@ -406,6 +422,36 @@ class VariableDispatcher<T> private constructor(
         }
 }
 
+//TODO: DRAFT SignalValue version
+// class VariableDispatcher<T> private constructor(
+//     private val handler: ValueGenericConsumer<T>
+// ) : SignalValue<T> by handler, SignalVariable<T> {
+//
+//     constructor(
+//         lifecycle: Lifecycle,
+//         defaultValue: T,
+//         handler: (ValueGenericConsumer.Dispatcher<T>) -> Unit = {}
+//     ) : this(
+//         ValueGenericConsumer(
+//             lifecycle,
+//             defaultValue,
+//             skipSameValue = true,
+//             assignValueImmediately = true,
+//             assignValueWhenFinished = true,
+//             handler = handler
+//         )
+//     )
+//
+//     override var value: T
+//         get() {
+//             return handler.value
+//         }
+//
+//         set(value) {
+//             handler.set(value)
+//         }
+// }
+
 class ValueGenericConsumer<T>(
     override val lifecycle: Lifecycle,
     defaultValue: T,
@@ -413,7 +459,7 @@ class ValueGenericConsumer<T>(
     private val assignValueImmediately: Boolean,
     private val assignValueWhenFinished: Boolean,
     private val handler: (Dispatcher<T>) -> Unit  //TODO: remove handler reference when lifecycle is finished
-): SignalValue<T> {
+): Value<T> {
 
     interface Dispatcher<T> {
         val prevValue: T
@@ -422,7 +468,7 @@ class ValueGenericConsumer<T>(
     }
 
     private class DispatcherImpl<T>(
-        private val listeners: ListenersRegistry<T>,
+        private val listeners: ListenersRegistry<Unit>,
         override val prevValue: T,
         override val valueAtTimeOfChange: T
     ) : Dispatcher<T> {
@@ -437,8 +483,12 @@ class ValueGenericConsumer<T>(
 
             dispatched = true
 
-            listeners.enqueueEvent(valueAtTimeOfChange)
+            listeners.enqueueEvent(Unit)
         }
+    }
+
+    override fun checkGeneration(): Long {
+        return valueGeneration
     }
 
     override var value: T = defaultValue
@@ -456,6 +506,7 @@ class ValueGenericConsumer<T>(
         val dispatcher = DispatcherImpl(listeners, this.value, value)
 
         if (assignValueImmediately) {
+            valueGeneration++
             this.value = value
         }
 
@@ -473,17 +524,19 @@ class ValueGenericConsumer<T>(
         }
     }
 
-    override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
+    override fun listen(lifecycle: Lifecycle, listener: (eventData: Unit) -> Unit) {
         listeners.add(lifecycle, listener)
     }
 
-    private val listeners = ListenersRegistry<T>(lifecycle)
+    private val listeners = ListenersRegistry<Unit>(lifecycle)
+    private var valueGeneration: Long = 0
     private var consumeInProgress: Boolean = false
     private val consumeQueue: MutableList<Dispatcher<T>> = mutableListOf()
 
     private fun handleItem(dispatcher: Dispatcher<T>) {
         if (!lifecycle.finished) {
             if (!assignValueImmediately) {
+                valueGeneration++
                 value = dispatcher.valueAtTimeOfChange
             }
 
@@ -491,11 +544,104 @@ class ValueGenericConsumer<T>(
             dispatcher.dispatch()
         } else {
             if (!assignValueImmediately && assignValueWhenFinished) {
+                valueGeneration++
                 value = dispatcher.valueAtTimeOfChange
             }
         }
     }
 }
+
+//TODO: DRAFT for SignalValue version
+// class ValueGenericConsumer<T>(
+//     override val lifecycle: Lifecycle,
+//     defaultValue: T,
+//     private val skipSameValue: Boolean,
+//     private val assignValueImmediately: Boolean,
+//     private val assignValueWhenFinished: Boolean,
+//     private val handler: (Dispatcher<T>) -> Unit  //TODO: remove handler reference when lifecycle is finished
+// ): SignalValue<T> {
+//
+//     interface Dispatcher<T> {
+//         val prevValue: T
+//         val valueAtTimeOfChange: T
+//         fun dispatch()
+//     }
+//
+//     private class DispatcherImpl<T>(
+//         private val listeners: ListenersRegistry<T>,
+//         override val prevValue: T,
+//         override val valueAtTimeOfChange: T
+//     ) : Dispatcher<T> {
+//
+//         var dispatched: Boolean = false
+//             private set
+//
+//         override fun dispatch() {
+//             if (dispatched) {
+//                 return
+//             }
+//
+//             dispatched = true
+//
+//             listeners.enqueueEvent(valueAtTimeOfChange)
+//         }
+//     }
+//
+//     override var value: T = defaultValue
+//         private set
+//
+//     fun set(value: T) {
+//         if (lifecycle.finished && !assignValueWhenFinished) {
+//             return
+//         }
+//
+//         if (skipSameValue && value == this.value) {
+//             return
+//         }
+//
+//         val dispatcher = DispatcherImpl(listeners, this.value, value)
+//
+//         if (assignValueImmediately) {
+//             this.value = value
+//         }
+//
+//         if (consumeInProgress) {
+//             consumeQueue.add(dispatcher)
+//         } else {
+//             consumeInProgress = true
+//             handleItem(dispatcher)
+//
+//             while (consumeQueue.isNotEmpty()) {
+//                 handleItem(consumeQueue.removeFirst())
+//             }
+//
+//             consumeInProgress = false
+//         }
+//     }
+//
+//     override fun listen(lifecycle: Lifecycle, listener: (dataAtTimeOfEvent: T) -> Unit) {
+//         listeners.add(lifecycle, listener)
+//     }
+//
+//     private val listeners = ListenersRegistry<T>(lifecycle)
+//     private var consumeInProgress: Boolean = false
+//     private val consumeQueue: MutableList<Dispatcher<T>> = mutableListOf()
+//
+//     private fun handleItem(dispatcher: Dispatcher<T>) {
+//         if (!lifecycle.finished) {
+//             if (!assignValueImmediately) {
+//                 value = dispatcher.valueAtTimeOfChange
+//             }
+//
+//             handler(dispatcher)
+//             dispatcher.dispatch()
+//         } else {
+//             if (!assignValueImmediately && assignValueWhenFinished) {
+//                 value = dispatcher.valueAtTimeOfChange
+//             }
+//         }
+//     }
+// }
 
 class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : ControlledLifecycle {
 
@@ -512,7 +658,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         ) {
             if (callIfAlreadyFinished) {
                 beforeFinishRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
-                coordinator.enqueueB(this::handleTail, Unit)
+                coordinator.enqueue(this::handleTail, Unit)
             }
         }
 
@@ -523,7 +669,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         ) {
             if (callIfAlreadyFinished) {
                 finishedRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
-                coordinator.enqueueB(this::handleTail, Unit)
+                coordinator.enqueue(this::handleTail, Unit)
             }
         }
 
@@ -543,12 +689,12 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
             val beforeFinishedListeners = beforeFinishRegistry.allListeners()
             if (beforeFinishedListeners.isNotEmpty()) {
                 beforeFinishRegistry.clearMainAndOthers()
-                coordinator.enqueueB(beforeFinishedListeners, Unit, this::handleTail)
+                coordinator.enqueue(beforeFinishedListeners, Unit, this::handleTail)
             } else {
                 val finalListeners = finishedRegistry.allListeners()
                 if (finalListeners.isNotEmpty()) {
                     finishedRegistry.clearMainAndOthers()
-                    coordinator.enqueueB(finalListeners, Unit, this::handleTail)
+                    coordinator.enqueue(finalListeners, Unit, this::handleTail)
                 }
             }
         }
@@ -574,7 +720,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         if (finished) {
             if (callIfAlreadyFinished) {
                 beforeFinishRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
-                coordinator.enqueueB(this::handleTail, Unit)
+                coordinator.enqueue(this::handleTail, Unit)
             }
 
             return
@@ -596,7 +742,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         if (finished) {
             if (callIfAlreadyFinished) {
                 finishedRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
-                coordinator.enqueueB(this::handleTail, Unit)
+                coordinator.enqueue(this::handleTail, Unit)
             }
 
             return
@@ -666,7 +812,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
             }
         }
 
-        coordinator.enqueueB(this::handleTail, Unit, onConsumed)
+        coordinator.enqueue(this::handleTail, Unit, onConsumed)
     }
 
     private fun handleTail(any: Unit) {
@@ -677,14 +823,14 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
         val beforeFinishedListeners = beforeFinishRegistry.allListeners()
         if (beforeFinishedListeners.isNotEmpty()) {
             beforeFinishRegistry.clearMainAndOthers()
-            coordinator.enqueueB(beforeFinishedListeners, Unit, this::handleTail)
+            coordinator.enqueue(beforeFinishedListeners, Unit, this::handleTail)
         } else {
             finished = true
 
             val finalListeners = finishedRegistry.allListeners()
             if (finalListeners.isNotEmpty()) {
                 finishedRegistry.clearMainAndOthers()
-                coordinator.enqueueB(finalListeners, Unit, this::handleTail)
+                coordinator.enqueue(finalListeners, Unit, this::handleTail)
             } else {
                 if (!consumed) {
                     consumed = true
@@ -827,8 +973,8 @@ object ThreadQueueControl {
 
 interface EventsQueueDispatcher {
     //TODO: in case of simultaneous afterHandled (from different calls) they should should be stacked (first in last out)
-    fun <T> enqueueB(block: (T) -> Unit, valueToDispatch: T, afterHandled: (() -> Unit)? = null)
-    fun <T> enqueueB(dispatchList: ImmutableList<(T) -> Unit>, valueToDispatch: T, afterHandled: (() -> Unit)? = null)
+    fun <T> enqueue(block: (T) -> Unit, valueToDispatch: T, afterHandled: (() -> Unit)? = null)
+    fun <T> enqueue(dispatchList: ImmutableList<(T) -> Unit>, valueToDispatch: T, afterHandled: (() -> Unit)? = null)
 }
 
 private object EventsGlobalCoordinator {
