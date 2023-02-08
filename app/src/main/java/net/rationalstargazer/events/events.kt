@@ -212,11 +212,13 @@ class ListenersRegistry<T>(
     }
 }
 
+@Deprecated("It is wrong. notify() can be called with callIfAlreadyFinished == true")
 private class StdListener<T>(
     override val lifecycle: Lifecycle,
     private val listenerFunction: (T) -> Unit) : Listener<T> {
 
     override fun notify(value: T) {
+        //TODO: it is wrong. notify() can be called with callIfAlreadyFinished == true
         if (!lifecycle.finished) {
             listenerFunction(value)
         }
@@ -363,11 +365,11 @@ class ChainGenericItem<T>(private val base: FunctionalValue<T>) : Value<T> by ba
     //     }
     // }
 
-    companion object {
-        private fun combineSources(sources: List<EventSource<Any>>): Lifecycle {
-
-        }
-    }
+    // companion object {
+    //     private fun combineSources(sources: List<EventSource<Any>>): Lifecycle {
+    //
+    //     }
+    // }
 
     private fun notifyChanged(any: Any) {
         base.notifyChanged()

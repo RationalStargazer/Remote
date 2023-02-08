@@ -2,6 +2,10 @@ package net.rationalstargazer
 
 interface ImmutableList<out E> : List<E>
 
+fun <E> List<E>.toImmutable(): ImmutableList<E> {
+    return this.toList().considerImmutable()
+}
+
 fun <E> List<E>.considerImmutable(): ImmutableList<E> {
     return PrivateList(this)
 }
