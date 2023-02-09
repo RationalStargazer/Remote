@@ -3,7 +3,6 @@ package net.rationalstargazer.events
 import net.rationalstargazer.ImmutableList
 import net.rationalstargazer.considerImmutable
 import net.rationalstargazer.immutableListOf
-import net.rationalstargazer.simpleevent.SimpleDataSource
 
 interface EventSource<out T> : HasLifecycle {
 
@@ -201,7 +200,7 @@ class ListenersRegistry<T>(
         return list.considerImmutable()
     }
 
-    private val commonItems: ArrayDeque<(T) -> Unit> = ArrayDeque()
+    private val commonItems: MutableList<(T) -> Unit> = mutableListOf()
     private val otherLifecyclesItems: MutableMap<Lifecycle, ListenersRegistry<T>> = mutableMapOf()
 
     init {
@@ -911,7 +910,7 @@ class LifecycleDispatcher(override val coordinator: EventsQueueDispatcher) : Con
             return list.considerImmutable()
         }
 
-        private val mainListeners: ArrayDeque<(T) -> Unit> = ArrayDeque()
+        private val mainListeners: MutableList<(T) -> Unit> = mutableListOf()
         private val otherListeners: MutableMap<Lifecycle, MutableList<(T) -> Unit>> = mutableMapOf()
     }
 }

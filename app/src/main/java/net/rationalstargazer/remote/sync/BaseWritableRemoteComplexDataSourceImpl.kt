@@ -4,7 +4,7 @@ import net.rationalstargazer.remote.sync.BaseWritableRemoteComplexDataSource.Syn
 
 abstract class BaseWritableRemoteComplexDataSourceImpl<Key, Value, Command>(
     protected val data: LocalRepository.ReaderWriter<Key, Value>,
-    protected val commandsSource: QueuedMessages<SyncCommand<Key, Command>>,
+    initialCommands: QueuedMessages<SyncCommand<Key, Command>>,
     protected val commandsHandler: BaseMessageQueueHandler<SyncCommand<Key, Command>>,
 
     protected val localCommandsReducer: (
