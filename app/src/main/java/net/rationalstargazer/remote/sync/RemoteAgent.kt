@@ -1,11 +1,6 @@
 package net.rationalstargazer.remote.sync
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
-import net.rationalstargazer.remote.RemoteData
-import net.rationalstargazer.simpleevent.SimpleDataSource
+import net.rationalstargazer.ImmutableList
 
 /*abstract class RemoteAgent<Key, Local, UploadData, Event> {
 
@@ -309,30 +304,42 @@ value class Id private constructor(val value: Int) {
     }
 }
 
-data class IdContainer<T>(val id: Id, val value: T)
+data class IdContainer<out T>(val id: Id, val value: T)
 
-data class EnumeratedMessageQueue<Message>(val active: IdContainer<Message>?, val waiting: List<IdContainer<Message>>) {
-    val activePlusWaiting: List<IdContainer<Message>> by lazy {
-        if (active != null) {
-            listOf(active) + waiting
-        } else {
-            waiting
-        }
+interface RemoteQueueHandler<Key, Value, Command> {
+
+    sealed class SyncCommand<Key, out Command> {
+        data class Receive<Key>(val key: Key, val conditions: SyncConditions) : SyncCommand<Key, Nothing>()
+        data class Send<Key, Command>(val key: Key, val command: Command) : SyncCommand<Key, Command>()
     }
+
+    sealed class QueueCommand<Key, out Command> {
+        data class Add<Key, out Command>(val syncCommand: IdContainer<SyncCommand<Key, Command>>) : QueueCommand<Key, Command>()
+        data class Remove<Key>(val commandId: Id) : QueueCommand<Key, Nothing>()
+        data class ReplaceAll<Key, out Command>(val commands: List<QueueCommand<Key, Command>>) : QueueCommand<Key, Command>()
+    }
+
+    fun addReceive(key: Key, conditions: SyncConditions): Id
+    fun addSent(key: Key, command: Command): Id
+    fun remove(id: Id)
+    fun replaceAll(list: ImmutableList<SyncCommand<Key, Command>>)
 }
 
 interface BaseMessageQueueHandler<Message> {
-    //val messages: SimpleDataSource<EnumeratedMessageQueue<Message>>
-
-    fun add(message: Message): Id
-    fun remove(messageId: Id)
-    fun replaceAll(messages: List<Message>)
+    fun add(message: Message)
+    fun removeAt(index: Int)
+    fun replaceAll(messages: ImmutableList<Message>)
+    fun start()
+    fun pause()
 }
 
-interface SyncDirectEvent<Event> {
-    fun addListener(listener: suspend (Event) -> Unit)
-    fun removeListener(listener: suspend (Event) -> Unit)
-}
+// interface BaseMessageQueueHandler<Message> {
+//     //val messages: SimpleDataSource<EnumeratedMessageQueue<Message>>
+//
+//     fun add(message: Message): Id
+//     fun remove(messageId: Id)
+//     fun replaceAll(messages: List<Message>)
+// }
 
 sealed class SyncConditions {
     // object ExistsLocally : SyncConditions()
@@ -341,18 +348,18 @@ sealed class SyncConditions {
     data class InLast(val millisecs: Long) : SyncConditions()
 }
 
+typealias MutableRemoteComplexDataSourceState<Key, Command> = MutableList<IdContainer<RemoteQueueHandler.SyncCommand<Key, Command>>>
+typealias RemoteComplexDataSourceState<Key, Command> = List<IdContainer<RemoteQueueHandler.SyncCommand<Key, Command>>>
+typealias RemoteComplexDataSourceCommands<Key, Command> = List<RemoteQueueHandler.QueueCommand<Key, Command>>
+
 interface BaseRemoteComplexDataSource<Key, Value> {
-    fun ensureSynced(key: Key, conditions: SyncConditions)
+
+    fun ensureSynced(key: Key, conditions: SyncConditions): Id
 
     suspend fun read(key: Key): Value?
 }
 
 interface BaseWritableRemoteComplexDataSource<Key, Value, Command> : BaseRemoteComplexDataSource<Key, Value> {
-
-    sealed class SyncCommand<Key, out Command> {
-        data class Receive<Key>(val key: Key, val conditions: SyncConditions) : SyncCommand<Key, Nothing>()
-        data class Send<Key, Command>(val key: Key, val command: Command) : SyncCommand<Key, Command>()
-    }
 
     fun write(key: Key, command: Command): Id
 
@@ -360,6 +367,16 @@ interface BaseWritableRemoteComplexDataSource<Key, Value, Command> : BaseRemoteC
 }
 
 interface LocalRepository {
+
+    interface ReadAccess<Key, Value> : Reader<Key, Value> {
+        suspend fun sole(block: suspend (Reader<Key, Value>) -> Unit)
+    }
+
+    interface WriteAccess<Key, Value> : ReaderWriter<Key, Value> {
+        suspend fun sole(block: suspend (ReaderWriter<Key, Value>) -> Unit)
+        val readOnlyAccess: ReadAccess<Key, Value>
+    }
+
     interface Reader<Key, Value> {
         suspend fun read(key: Key): Value?
     }
@@ -395,10 +412,14 @@ interface DirectLocalRepository {
     }
 }
 
-interface DirectRemoteRepositoryReceiver<Key, Value> {
-    suspend fun get(key: Key): Result<Value>
-}
+interface DirectRemoteRepository<Key, Value> {
+    interface Sender<Key, Value> {
+        suspend fun send(key: Key, value: Value): Result<Value>
+    }
 
-interface DirectRemoteRepositorySender<Key, Value> {
-    suspend fun send(key: Key, value: Value): Result<Value>
+    interface Receiver<Key, Value> {
+        suspend fun get(key: Key): Result<Value>
+    }
+
+    interface SenderReceiver<Key, Value> : Sender<Key, Value>, Receiver<Key, Value>
 }

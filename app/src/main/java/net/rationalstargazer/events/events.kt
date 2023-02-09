@@ -33,7 +33,7 @@ interface EventSource<out T> : HasLifecycle {
 /**
  * `Value` is essentially an [EventSource] that holding (or keeping) a value that can be changed over time.
  */
-interface Value<out T> : EventSource<Unit> {
+interface RStaValue<out T> : EventSource<Unit> {
     fun checkGeneration(): Long
     val value: T
 }
@@ -241,7 +241,7 @@ class FunctionalValue<T>(
     override val lifecycle: Lifecycle,
     valueGeneration: () -> Long,
     function: () -> T
-) : Value<T> {
+) : RStaValue<T> {
 
     // object EventBased {
     //     fun <T> create(
@@ -334,7 +334,7 @@ class FunctionalValue<T>(
     }
 }
 
-class ChainGenericItem<T>(private val base: FunctionalValue<T>) : Value<T> by base {
+class ChainGenericItem<T>(private val base: FunctionalValue<T>) : RStaValue<T> by base {
 
     constructor(
         lifecycle: Lifecycle,
@@ -377,11 +377,11 @@ class ChainGenericItem<T>(private val base: FunctionalValue<T>) : Value<T> by ba
 
 class ValueMapper<V, V0> private constructor(
     private val base: ChainGenericItem<V>
-) : Value<V> by base {
+) : RStaValue<V> by base {
 
     constructor(
         lifecycle: Lifecycle,
-        source: Value<V0>,
+        source: RStaValue<V0>,
         mapper: (V0) -> V
     ) : this(
         ChainGenericItem(
@@ -396,7 +396,7 @@ class ValueMapper<V, V0> private constructor(
 
 class ValueDispatcher<T> private constructor(
     private val handler: ValueGenericConsumer<T>
-) : Value<T> by handler {
+) : RStaValue<T> by handler {
 
     constructor(
         lifecycle: Lifecycle,
@@ -460,7 +460,7 @@ class ValueGenericConsumer<T>(
     private val assignValueImmediately: Boolean,
     private val assignValueWhenFinished: Boolean,
     private val handler: (Dispatcher<T>) -> Unit  //TODO: remove handler reference when lifecycle is finished
-): Value<T> {
+): RStaValue<T> {
 
     interface Dispatcher<T> {
         val prevValue: T

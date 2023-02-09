@@ -21,5 +21,6 @@
     <inspection_tool class="PreviewPickerAnnotation" enabled="true" level="ERROR" enabled_by_default="true">
       <option name="previewFile" value="true" />
     </inspection_tool>
+    <inspection_tool class="UnnecessaryVariable" enabled="true" level="INFORMATION" enabled_by_default="true" />
   </profile>
 </component>

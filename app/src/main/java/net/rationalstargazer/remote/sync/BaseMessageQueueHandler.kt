@@ -4,150 +4,53 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import net.rationalstargazer.ImmutableList
-import net.rationalstargazer.considerImmutable
 import net.rationalstargazer.events.Lifecycle
-import net.rationalstargazer.events.Value
+import net.rationalstargazer.events.RStaValue
 import net.rationalstargazer.events.ValueDispatcher
-import net.rationalstargazer.simpleevent.SimpleDataSource
-import net.rationalstargazer.toImmutable
 import kotlin.coroutines.CoroutineContext
 
-typealias QueuedMessages<Message> = SimpleDataSource<EnumeratedMessageQueue<Message>>
+//typealias QueuedMessages<Message> = SimpleDataSource<EnumeratedMessageQueue<Message>>
 //typealias MessagesConsumer<Message> = (List<IdContainer<Message>>) -> Unit
 
-abstract class BaseMessageQueueHandlerImpl<Message>(
+class BaseMessageQueueHandlerImpl<Message>(
     lifecycle: Lifecycle,  //TODO: change to something like CoroutineLifecycle
-    queueContext: CoroutineContext
+    queueContext: CoroutineContext,
+    private val handler: suspend (Message) -> Unit
 ) : BaseMessageQueueHandler<Message> {
 
-    sealed class Command<Message> {
-        data class Add<Message>(val message: IdContainer<Message>) : Command<Message>()
-        data class Remove<Message>(val messageId: Id) : Command<Message>()
-        data class ReplaceAll<Message>(val messages: ImmutableList<Message>) : Command<Message>()
+    //TODO: it is wrong, switch to VariableDispatcher (SignalValue version) because all values are essential
+    private val _messages = ValueDispatcher<List<Message>>(lifecycle, emptyList())
+
+    val messages: RStaValue<List<Message>> = _messages
+
+    override fun add(message: Message) {
+        _messages.value = _messages.value + message
+        channel.trySend(Unit)
     }
 
-    private val _commands = mutableListOf<Command<Message>>()
-
-    val commands: ImmutableList<Command<Message>>
-        get() {
-            return _commands.toImmutable()
+    override fun removeAt(index: Int) {
+        val messages = _messages.value
+        if (index !in messages.indices) {
+            //TODO: improve logging here
+            return
         }
 
-    //TODO: it is wrong, switch to VariableDispatcher (SignalValue version) because all values are essential
-    private val _messages = ValueDispatcher<EnumeratedMessageQueue<Message>>(
-        lifecycle,
-        EnumeratedMessageQueue(null, emptyList())
-    )
-
-    val messages: Value<EnumeratedMessageQueue<Message>> = _messages
-
-    final override fun add(message: Message): Id {
-        val newMessage = IdContainer(ids.newId(), message)
-        _commands.add(Command.Add(newMessage))
-        channel.trySend(Unit)
-        return newMessage.id
+        _messages.value = messages.toMutableList().also { it.removeAt(index) }
     }
 
-    final override fun remove(messageId: Id) {
-        _commands.add(Command.Remove(messageId))
+    override fun replaceAll(messages: ImmutableList<Message>) {
+        _messages.value = messages
         channel.trySend(Unit)
     }
-
-    final override fun replaceAll(messages: List<Message>) {
-        _commands.add(Command.ReplaceAll(messages.toImmutable()))
-        channel.trySend(Unit)
-    }
-
-    private val ids = Id.Factory.create()
 
     private val channel = Channel<Unit>(Channel.CONFLATED)
 
-    protected open suspend fun startHandling() {
-        while(_commands.isNotEmpty() || _messages.value.waiting.isNotEmpty()) {
-            //TODO
-            //check(_messages.value.active == null, "active is not empty before starting next item")
-
-            var waiting = _messages.value.waiting.considerImmutable()
-            while (true) {
-                val next = _commands.removeFirstOrNull()
-                if (next == null) {
-                    break
-                }
-
-                waiting = when (next) {
-                    is Command.Add -> handleAdd(waiting, next.message)
-                    is Command.Remove -> handleRemove(waiting, next.messageId)
-                    is Command.ReplaceAll -> handleReplaceAll(waiting, next.messages)
-                }
-            }
-
-
-            val state = handleBeforeMessage(waiting)
-
-            val active = state.active
-            //check(active != null || state.waiting.isEmpty(), "state.active is null while state.waiting is not empty")
-
-            _messages.value = state
-
-            if (active == null) {
-                continue
-            }
-
-            val nextMessages = handleMessage(state)
-
-            val nextState = EnumeratedMessageQueue(null, nextMessages)
-
-            _messages.value = nextState
-
-            handleMessageFinished(nextState, active)
+    private suspend fun startHandling() {
+        while(_messages.value.isNotEmpty()) {
+            val message = _messages.value.first()
+            _messages.value = _messages.value.drop(1)
+            handler(message)
         }
-    }
-
-    protected open suspend fun handleAdd(
-        state: ImmutableList<IdContainer<Message>>,
-        message: IdContainer<Message>
-    ): ImmutableList<IdContainer<Message>> {
-        return (state + message).considerImmutable()
-    }
-
-    protected open suspend fun handleRemove(
-        state: ImmutableList<IdContainer<Message>>,
-        messageId: Id
-    ): ImmutableList<IdContainer<Message>> {
-        val i = state.indexOfFirst { it.id == messageId }
-        if (i >= 0) {
-            return state.toMutableList()
-                .also {
-                    it.removeAt(i)
-                }
-                .considerImmutable()
-        }
-
-        return state
-    }
-
-    protected open suspend fun handleReplaceAll(
-        state: ImmutableList<IdContainer<Message>>,
-        messages: ImmutableList<Message>
-    ): ImmutableList<IdContainer<Message>> {
-        val nextState = messages.map { IdContainer(ids.newId(), it) }
-        return nextState.considerImmutable()
-    }
-
-    protected open suspend fun handleBeforeMessage(messages: ImmutableList<IdContainer<Message>>): EnumeratedMessageQueue<Message> {
-        val nextMessage = messages.firstOrNull()
-        if (nextMessage == null) {
-            return EnumeratedMessageQueue(null, emptyList())
-        }
-
-        val nextState = EnumeratedMessageQueue(nextMessage, messages.drop(1))
-        return nextState
-    }
-
-    protected abstract suspend fun handleMessage(state: EnumeratedMessageQueue<Message>): ImmutableList<IdContainer<Message>>
-
-    protected open suspend fun handleMessageFinished(state: EnumeratedMessageQueue<Message>, handledMessage: IdContainer<Message>) {
-        // empty
     }
 
     init {
