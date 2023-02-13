@@ -6,7 +6,7 @@ import net.rationalstargazer.events.RStaValue
 import net.rationalstargazer.events.ValueDispatcher
 import kotlin.coroutines.CoroutineContext
 
-class BaseWritableRemoteComplexDataSourceImpl<Key, Value, Command>(
+ class BaseWritableRemoteComplexDataSourceImpl<Key, Value, Command>(
     val lifecycle: Lifecycle,
     queueContext: CoroutineContext,
     private val local: LocalRepository.WriteAccess<Key, Value>,
@@ -24,12 +24,12 @@ class BaseWritableRemoteComplexDataSourceImpl<Key, Value, Command>(
         commands: RemoteComplexDataSourceState<Key, Command>
     ) -> Value?,
 
-    private val handler: (
+    private val handler: suspend (
         state: RemoteComplexDataSourceState<Key, Command>,
         read: LocalRepository.ReadAccess<Key, Value>,
         write: suspend (suspend (LocalRepository.Writer<Key, Value>) -> RemoteComplexDataSourceState<Key, Command>) -> Unit
     ) -> Unit,
-) : BaseWritableRemoteComplexDataSource<Key, Value, Command> {
+): BaseWritableRemoteComplexDataSource<Key, Value, Command> {
 
     //TODO: it is wrong, switch to VariableDispatcher (SignalValue version) because all values are essential
     private val _state = ValueDispatcher<RemoteComplexDataSourceState<Key, Command>>(lifecycle, mutableListOf())

@@ -314,9 +314,15 @@ interface RemoteQueueHandler<Key, Value, Command> {
     }
 
     sealed class QueueCommand<Key, out Command> {
-        data class Add<Key, out Command>(val syncCommand: IdContainer<SyncCommand<Key, Command>>) : QueueCommand<Key, Command>()
+        data class Add<Key, out Command>(
+            val syncCommand: IdContainer<SyncCommand<Key, Command>>
+        ) : QueueCommand<Key, Command>()
+
         data class Remove<Key>(val commandId: Id) : QueueCommand<Key, Nothing>()
-        data class ReplaceAll<Key, out Command>(val commands: List<QueueCommand<Key, Command>>) : QueueCommand<Key, Command>()
+
+        data class ReplaceAll<Key, out Command>(
+            val commands: List<IdContainer<SyncCommand<Key, Command>>>
+        ) : QueueCommand<Key, Command>()
     }
 
     fun addReceive(key: Key, conditions: SyncConditions): Id
@@ -389,10 +395,22 @@ interface LocalRepository {
 }
 
 interface LocalListRepository {
+
+    interface ReadAccess<T> : Reader<T> {
+        suspend fun sole(block: suspend (Reader<T>) -> Unit)
+    }
+
+    interface WriteAccess<T> : ReaderWriter<T> {
+        suspend fun sole(block: suspend (ReaderWriter<T>) -> Unit)
+        val readOnlyAccess: ReadAccess<T>
+    }
+
     interface Reader<T> : LocalRepository.Reader<Int, T> {
         val size: Int?
 
-        //suspend fun findSize(): Int
+        suspend fun findSize(): Int
+
+        suspend fun sublist(range: IntRange): List<T>
     }
 
     interface Writer<T> : LocalRepository.Writer<Int, T> {

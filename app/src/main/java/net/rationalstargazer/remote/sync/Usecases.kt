@@ -1,5 +1,9 @@
 package net.rationalstargazer.remote.sync
 
+import net.rationalstargazer.considerImmutable
+import net.rationalstargazer.events.Lifecycle
+import kotlin.coroutines.CoroutineContext
+
 /*
 class Usecases {
 
@@ -251,6 +255,99 @@ data class ChatData(
 
 class Usecases {
 
+    lateinit var chatRepo: BaseWritableRemoteComplexDataSource<ChatChannel, ChatData, SyncChatCommand>
+
+    suspend fun init(lifecycle: Lifecycle, context: CoroutineContext) {
+        val remote: DirectRemoteRepository.SenderReceiver<ChatChannel, ChatData> = XXX
+
+        val local: LocalRepository.WriteAccess<ChatChannel, ChatData> = XXX
+
+        val commandsRepo: LocalListRepository.WriteAccess<SyncChatCommand> = XXX
+
+        commandsRepo.sole { repo ->
+            val size = repo.findSize()
+            val items = repo.sublist(0..size)
+                .map {
+                    RemoteQueueHandler.SyncCommand.Send(it.channel, SyncChatCommand(it.channel, it.data))
+                }
+                .considerImmutable()
+
+            chatRepo = BaseWritableRemoteComplexDataSourceImpl(
+                lifecycle,
+                context,
+                local,
+                true,
+                items,
+
+                {
+                    state: RemoteComplexDataSourceState<ChatChannel, SyncChatCommand>,
+                    waitingCommands: RemoteComplexDataSourceCommands<ChatChannel, SyncChatCommand> ->
+
+                    val nextState = state.toMutableList()
+
+                    for (command in waitingCommands) {
+                        when (command) {
+                            is RemoteQueueHandler.QueueCommand.Add -> {
+                                nextState.add(command.syncCommand)
+                            }
+
+                            is RemoteQueueHandler.QueueCommand.Remove -> {
+                                val i = nextState.indexOfFirst { it.id == command.commandId }
+                                if (i >= 0) {
+                                    nextState.removeAt(i)
+                                }
+                            }
+
+                            is RemoteQueueHandler.QueueCommand.ReplaceAll -> {
+                                nextState.clear()
+                                nextState.addAll(command.commands)
+                            }
+                        }
+                    }
+
+                    nextState
+                },
+
+                {
+                    key: ChatChannel,
+                    initialValue: ChatData?,
+                    commands: RemoteComplexDataSourceState<ChatChannel, SyncChatCommand> ->
+
+                    ChatData(0, emptyList(), 0, 0)
+                },
+
+                { state, read, write ->
+                    val first = state.firstOrNull()
+
+                    if (first == null) {
+                        return@BaseWritableRemoteComplexDataSourceImpl
+                    }
+
+                    val command = first.value
+
+                    val result = when (command) {
+                        is RemoteQueueHandler.SyncCommand.Receive -> {
+                            remote.get(command.key).getOrNull()
+                        }
+
+                        is RemoteQueueHandler.SyncCommand.Send -> {
+                            remote.send(command.key, command.command.data).getOrNull()
+                        }
+                    }
+
+                    if (result != null) {
+                        write { writer ->
+                            writer.write(ChatChannel(result.channelId.toString()), "data")
+                            state.drop(1)
+                        }
+                    } else {
+                        TODO("handle error here")
+                    }
+                }
+            )
+        }
+    }
+
     private val user: LocalRepository.ReaderWriter<Unit, Int> = XXX
     private val local: LocalRepository.ReaderWriter<ChatChannel, ChatData> = XXX
     private val chat = ChatRemoteRepository()
@@ -291,3 +388,5 @@ data class ChatData(
     val numOfUnread: Int,
     val draft: Int
 )
+
+data class SyncChatCommand(val channel: ChatChannel, val data: String)
