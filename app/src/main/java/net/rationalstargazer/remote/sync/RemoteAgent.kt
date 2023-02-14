@@ -306,11 +306,20 @@ value class Id private constructor(val value: Int) {
 
 data class IdContainer<out T>(val id: Id, val value: T)
 
+//typealias MutableRemoteQueueHandlerQueue<Key, Command> = MutableList<IdContainer<RemoteQueueHandler.SyncCommand<Key, Command>>>
+typealias RemoteQueueHandlerQueue<Key, Command> = List<IdContainer<RemoteQueueHandler.SyncCommand<Key, Command>>>
+typealias RemoteQueueHandlerCommands<Key, Command> = List<RemoteQueueHandler.QueueCommand<Key, Command>>
+
 interface RemoteQueueHandler<Key, Value, Command> {
 
+    data class State<Data, Key, Commands>(val data: Data, val queue: RemoteQueueHandlerQueue<Key, Commands>)
+
     sealed class SyncCommand<Key, out Command> {
-        data class Receive<Key>(val key: Key, val conditions: SyncConditions) : SyncCommand<Key, Nothing>()
-        data class Send<Key, Command>(val key: Key, val command: Command) : SyncCommand<Key, Command>()
+
+        abstract val key: Key
+
+        data class Receive<Key>(override val key: Key, val conditions: SyncConditions) : SyncCommand<Key, Nothing>()
+        data class Send<Key, Command>(override val key: Key, val command: Command) : SyncCommand<Key, Command>()
     }
 
     sealed class QueueCommand<Key, out Command> {
@@ -354,10 +363,6 @@ sealed class SyncConditions {
     data class InLast(val millisecs: Long) : SyncConditions()
 }
 
-typealias MutableRemoteComplexDataSourceState<Key, Command> = MutableList<IdContainer<RemoteQueueHandler.SyncCommand<Key, Command>>>
-typealias RemoteComplexDataSourceState<Key, Command> = List<IdContainer<RemoteQueueHandler.SyncCommand<Key, Command>>>
-typealias RemoteComplexDataSourceCommands<Key, Command> = List<RemoteQueueHandler.QueueCommand<Key, Command>>
-
 interface BaseRemoteComplexDataSource<Key, Value> {
 
     fun ensureSynced(key: Key, conditions: SyncConditions): Id
@@ -397,11 +402,11 @@ interface LocalRepository {
 interface LocalListRepository {
 
     interface ReadAccess<T> : Reader<T> {
-        suspend fun sole(block: suspend (Reader<T>) -> Unit)
+        suspend fun <R> sole(block: suspend (Reader<T>) -> R): R
     }
 
     interface WriteAccess<T> : ReaderWriter<T> {
-        suspend fun sole(block: suspend (ReaderWriter<T>) -> Unit)
+        suspend fun <R> sole(block: suspend (ReaderWriter<T>) -> R): R
         val readOnlyAccess: ReadAccess<T>
     }
 
@@ -411,10 +416,14 @@ interface LocalListRepository {
         suspend fun findSize(): Int
 
         suspend fun sublist(range: IntRange): List<T>
+
+        suspend fun getAll(): List<T>
     }
 
     interface Writer<T> : LocalRepository.Writer<Int, T> {
         fun add(value: T)
+
+        fun replaceAll(list: List<T>)
     }
 
     interface ReaderWriter<T> : Reader<T>, Writer<T>

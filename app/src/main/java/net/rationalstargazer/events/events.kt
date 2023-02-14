@@ -33,7 +33,7 @@ interface EventSource<out T> : HasLifecycle {
 /**
  * `Value` is essentially an [EventSource] that holding (or keeping) a value that can be changed over time.
  */
-interface RStaValue<out T> : EventSource<Unit> {
+interface RStaValue<out T> /* : EventSource<Unit> TODO: we want to add `invokeNow` parameter to listeners */ {
     fun checkGeneration(): Long
     val value: T
 }

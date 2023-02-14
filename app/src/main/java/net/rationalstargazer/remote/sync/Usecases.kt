@@ -2,6 +2,7 @@ package net.rationalstargazer.remote.sync
 
 import net.rationalstargazer.considerImmutable
 import net.rationalstargazer.events.Lifecycle
+import net.rationalstargazer.remote.RemoteData
 import kotlin.coroutines.CoroutineContext
 
 /*
@@ -253,9 +254,13 @@ data class ChatData(
     val draft: Int
 )*/
 
+typealias ChatRepoNetworking = Map<ChatChannel, Usecases.NetworkData>
+
 class Usecases {
 
-    lateinit var chatRepo: BaseWritableRemoteComplexDataSource<ChatChannel, ChatData, SyncChatCommand>
+    data class NetworkData(val inProgress: Boolean, val lastResult: RemoteData<Unit>?, val lastResultTime: Long)
+
+    lateinit var chatRepo: BaseWritableRemoteComplexDataSourceImpl<ChatRepoNetworking, ChatChannel, ChatData, SyncChatCommand>
 
     suspend fun init(lifecycle: Lifecycle, context: CoroutineContext) {
         val remote: DirectRemoteRepository.SenderReceiver<ChatChannel, ChatData> = XXX
@@ -264,93 +269,100 @@ class Usecases {
 
         val commandsRepo: LocalListRepository.WriteAccess<SyncChatCommand> = XXX
 
-        commandsRepo.sole { repo ->
-            val size = repo.findSize()
-            val items = repo.sublist(0..size)
-                .map {
-                    RemoteQueueHandler.SyncCommand.Send(it.channel, SyncChatCommand(it.channel, it.data))
+        val items = commandsRepo.getAll()
+            .map {
+                RemoteQueueHandler.SyncCommand.Send(it.channel, SyncChatCommand(it.channel, it.data))
+            }
+
+        chatRepo = BaseWritableRemoteComplexDataSourceImpl<ChatRepoNetworking, ChatChannel, ChatData, SyncChatCommand>(
+            lifecycle,
+            context,
+            local,
+            true,
+            emptyMap(),
+            items,
+
+            { state, commands ->
+
+                val queue = state.queue.toMutableList()
+
+                for (command in commands) {
+                    when (command) {
+                        is RemoteQueueHandler.QueueCommand.Add -> {
+                            queue.add(command.syncCommand)
+                        }
+
+                        is RemoteQueueHandler.QueueCommand.Remove -> {
+                            val i = queue.indexOfFirst { it.id == command.commandId }
+                            if (i >= 0) {
+                                queue.removeAt(i)
+                            }
+                        }
+
+                        is RemoteQueueHandler.QueueCommand.ReplaceAll -> {
+                            queue.clear()
+                            queue.addAll(command.commands)
+                        }
+                    }
                 }
-                .considerImmutable()
 
-            chatRepo = BaseWritableRemoteComplexDataSourceImpl(
-                lifecycle,
-                context,
-                local,
-                true,
-                items,
+                RemoteQueueHandler.State(state.data, queue)
+            },
 
-                {
-                    state: RemoteComplexDataSourceState<ChatChannel, SyncChatCommand>,
-                    waitingCommands: RemoteComplexDataSourceCommands<ChatChannel, SyncChatCommand> ->
+            { key, initialValue, state ->
+                ChatData(0, emptyList(), 0, 0)
+            },
 
-                    val nextState = state.toMutableList()
+            { state, _, write ->
+                val first = state.queue.firstOrNull()
 
-                    for (command in waitingCommands) {
-                        when (command) {
-                            is RemoteQueueHandler.QueueCommand.Add -> {
-                                nextState.add(command.syncCommand)
-                            }
+                if (first == null) {
+                    return@BaseWritableRemoteComplexDataSourceImpl
+                }
 
-                            is RemoteQueueHandler.QueueCommand.Remove -> {
-                                val i = nextState.indexOfFirst { it.id == command.commandId }
-                                if (i >= 0) {
-                                    nextState.removeAt(i)
-                                }
-                            }
+                val command = first.value
 
-                            is RemoteQueueHandler.QueueCommand.ReplaceAll -> {
-                                nextState.clear()
-                                nextState.addAll(command.commands)
-                            }
-                        }
+                val result = when (command) {
+                    is RemoteQueueHandler.SyncCommand.Receive -> {
+                        remote.get(command.key).getOrNull()
                     }
 
-                    nextState
-                },
-
-                {
-                    key: ChatChannel,
-                    initialValue: ChatData?,
-                    commands: RemoteComplexDataSourceState<ChatChannel, SyncChatCommand> ->
-
-                    ChatData(0, emptyList(), 0, 0)
-                },
-
-                { state, read, write ->
-                    val first = state.firstOrNull()
-
-                    if (first == null) {
-                        return@BaseWritableRemoteComplexDataSourceImpl
+                    is RemoteQueueHandler.SyncCommand.Send -> {
+                        remote.send(command.key, command.command.data).getOrNull()
                     }
+                }
 
-                    val command = first.value
+                val nextData = state.data.toMutableMap().also { it[command.key] = NetworkData(false, result, time) }
 
-                    val result = when (command) {
-                        is RemoteQueueHandler.SyncCommand.Receive -> {
-                            remote.get(command.key).getOrNull()
-                        }
-
-                        is RemoteQueueHandler.SyncCommand.Send -> {
-                            remote.send(command.key, command.command.data).getOrNull()
-                        }
-                    }
-
+                write { writer ->
                     if (result != null) {
-                        write { writer ->
-                            writer.write(ChatChannel(result.channelId.toString()), "data")
-                            state.drop(1)
-                        }
-                    } else {
-                        TODO("handle error here")
+                        writer.write(ChatChannel(result.channelId.toString()), "data")
+                    }
+
+                    RemoteQueueHandler.State(
+                        nextData,
+                        state.queue.drop(1)
+                    )
+                }
+            }
+        )
+
+        chatRepo.state.listen(false, lifecycle) {
+            val sendItems = chatRepo.state.value.queue
+                .mapNotNull { item ->
+                    when (item.value) {
+                        is RemoteQueueHandler.SyncCommand.Send -> item.value.command
+
+                        is RemoteQueueHandler.SyncCommand.Receive -> null
                     }
                 }
-            )
+
+            commandsRepo.replaceAll(sendItems)
         }
     }
 
     private val user: LocalRepository.ReaderWriter<Unit, Int> = XXX
     private val local: LocalRepository.ReaderWriter<ChatChannel, ChatData> = XXX
-    private val chat = ChatRemoteRepository()
 
     suspend fun syncGeneralChat() {
         val user = user.read(Unit)
@@ -363,21 +375,12 @@ class Usecases {
             return
         }
 
-        chat.ensureSynced(ChatChannel(user.toString()), SyncConditions.InLast(60000))
+        chatRepo.ensureSynced(ChatChannel(user.toString()), SyncConditions.InLast(60000))
     }
 
     suspend fun initUserId() {
 
     }
-}
-
-class ChatRemoteRepository : BaseWritableRemoteComplexDataSourceImpl<ChatChannel, ChatData, ChatChannel>(
-    local,
-    commands,
-    commandsHandler,
-    commandsReducer
-) {
-
 }
 
 data class ChatChannel(val id: String)
