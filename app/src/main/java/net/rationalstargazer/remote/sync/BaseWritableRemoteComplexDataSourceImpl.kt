@@ -1,6 +1,5 @@
 package net.rationalstargazer.remote.sync
 
-import net.rationalstargazer.ImmutableList
 import net.rationalstargazer.events.Lifecycle
 import net.rationalstargazer.events.RStaValue
 import net.rationalstargazer.events.ValueDispatcher
@@ -34,12 +33,18 @@ import kotlin.coroutines.CoroutineContext
     ) -> Unit,
 ): BaseWritableRemoteComplexDataSource<Key, Value, Command> {
 
-    //TODO: it is wrong, switch to VariableDispatcher (SignalValue version) because all values are essential
-    private val _state = ValueDispatcher<RemoteQueueHandler.State<StateData, Key, Command>>(lifecycle, initialState)
+     private val ids = Id.Factory.create()
+
+     private val _state = ValueDispatcher<RemoteQueueHandler.State<StateData, Key, Command>>(
+        lifecycle,
+        RemoteQueueHandler.State(
+            initialData,
+            initialCommands.map { IdContainer(ids.newId(), it) }
+        )
+    )
 
     val state: RStaValue<RemoteQueueHandler.State<StateData, Key, Command>> = _state
 
-    //TODO: it is wrong, switch to VariableDispatcher (SignalValue version) because all values are essential
     private val _waiting = ValueDispatcher<RemoteQueueHandlerCommands<Key, Command>>(lifecycle, emptyList())
 
     val waiting: RStaValue<RemoteQueueHandlerCommands<Key, Command>> = _waiting
@@ -95,8 +100,6 @@ import kotlin.coroutines.CoroutineContext
     }
 
     private var active: Boolean = false
-
-    private val ids = Id.Factory.create()
 
     private val commandsQueue = BaseMessageQueueHandlerImpl<Unit>(lifecycle, queueContext, this::handleCommands)
 

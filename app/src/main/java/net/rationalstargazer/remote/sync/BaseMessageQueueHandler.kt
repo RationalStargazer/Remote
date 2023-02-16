@@ -9,16 +9,12 @@ import net.rationalstargazer.events.RStaValue
 import net.rationalstargazer.events.ValueDispatcher
 import kotlin.coroutines.CoroutineContext
 
-//typealias QueuedMessages<Message> = SimpleDataSource<EnumeratedMessageQueue<Message>>
-//typealias MessagesConsumer<Message> = (List<IdContainer<Message>>) -> Unit
-
 class BaseMessageQueueHandlerImpl<Message>(
     lifecycle: Lifecycle,  //TODO: change to something like CoroutineLifecycle
     queueContext: CoroutineContext,
     private val handler: suspend (Message) -> Unit
 ) : BaseMessageQueueHandler<Message> {
 
-    //TODO: it is wrong, switch to VariableDispatcher (SignalValue version) because all values are essential
     private val _messages = ValueDispatcher<List<Message>>(lifecycle, emptyList())
 
     val messages: RStaValue<List<Message>> = _messages
