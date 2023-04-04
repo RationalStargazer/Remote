@@ -1,6 +1,8 @@
 package net.rationalstargazer
 
-interface ImmutableList<out E> : List<E>
+interface RStaImmutableList<out E> : List<E>
+
+internal typealias ImmutableList<E> = RStaImmutableList<E>
 
 fun <E> List<E>.toImmutable(): ImmutableList<E> {
     return this.toList().considerImmutable()
@@ -11,7 +13,7 @@ fun <E> List<E>.considerImmutable(): ImmutableList<E> {
 }
 
 fun <E>immutableListOf(vararg list: E): ImmutableList<E> {
-    return PrivateArray(list.clone())
+    return PrivateArray(list.clone())  // is it really necessary to clone source array?
 }
 
 @JvmInline
