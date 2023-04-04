@@ -27,13 +27,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
-        GlobalScope.launch {
-            CoroutineScope(Job() + Dispatchers.IO)
-            withContext(NonCancellable) {
-
-            }
-        }
     }
 }
 

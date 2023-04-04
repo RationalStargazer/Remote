@@ -7,14 +7,15 @@ fun <E> List<E>.toImmutable(): ImmutableList<E> {
 }
 
 fun <E> List<E>.considerImmutable(): ImmutableList<E> {
-    return PrivateList(this)
+    return InlinedList(this)
 }
 
 fun <E>immutableListOf(vararg list: E): ImmutableList<E> {
     return PrivateArray(list.clone())
 }
 
-private class PrivateList<out E>(privateList: List<E>) : List<E> by privateList, ImmutableList<E>
+@JvmInline
+private value class InlinedList<out E>(val privateList: List<E>) : List<E> by privateList, ImmutableList<E>
 
 private class PrivateArray<out E>(private val privateArray: Array<E>) : AbstractList<E>(), ImmutableList<E> {
 

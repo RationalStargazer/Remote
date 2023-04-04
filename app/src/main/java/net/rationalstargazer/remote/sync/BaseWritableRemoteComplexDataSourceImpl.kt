@@ -1,14 +1,15 @@
 package net.rationalstargazer.remote.sync
 
 import net.rationalstargazer.events.Lifecycle
+import net.rationalstargazer.events.LifecycleBasedSimpleCoroutineDispatcher
 import net.rationalstargazer.events.RStaValue
 import net.rationalstargazer.events.ValueDispatcher
-import kotlin.coroutines.CoroutineContext
+import net.rationalstargazer.logic.BaseMessageQueueHandlerImpl
 
- class BaseWritableRemoteComplexDataSourceImpl<StateData, Key, Value, Command>(
-    val lifecycle: Lifecycle,
-    queueContext: CoroutineContext,
-    private val local: LocalRepository.WriteAccess<Key, Value>,
+class BaseWritableRemoteComplexDataSourceImpl<StateData, Key, Value, Command>(
+    private val lifecycle: Lifecycle,
+    private val coroutineDispatcher: LifecycleBasedSimpleCoroutineDispatcher,
+    private val local: Repository.WriteAccess<Key, Value>,
     private val startNow: Boolean,
     initialData: StateData,
     initialCommands: List<RemoteQueueHandler.SyncCommand<Key, Command>>,
@@ -26,16 +27,16 @@ import kotlin.coroutines.CoroutineContext
 
     private val handler: suspend (
         state: RemoteQueueHandler.State<StateData, Key, Command>,
-        read: LocalRepository.ReadAccess<Key, Value>,
+        read: Repository.ReadAccess<Key, Value>,
         write: suspend (
-            suspend (LocalRepository.Writer<Key, Value>) -> RemoteQueueHandler.State<StateData, Key, Command>
+            suspend (Repository.Writer<Key, Value>) -> RemoteQueueHandler.State<StateData, Key, Command>
         ) -> Unit
     ) -> Unit,
 ): BaseWritableRemoteComplexDataSource<Key, Value, Command> {
 
-     private val ids = Id.Factory.create()
+    private val ids = Id.Factory.create()
 
-     private val _state = ValueDispatcher<RemoteQueueHandler.State<StateData, Key, Command>>(
+    private val _state = ValueDispatcher<RemoteQueueHandler.State<StateData, Key, Command>>(
         lifecycle,
         RemoteQueueHandler.State(
             initialData,
@@ -50,7 +51,13 @@ import kotlin.coroutines.CoroutineContext
     val waiting: RStaValue<RemoteQueueHandlerCommands<Key, Command>> = _waiting
 
     override fun ensureSynced(key: Key, conditions: SyncConditions): Id {
-        val command = IdContainer(ids.newId(), RemoteQueueHandler.SyncCommand.Receive(key, conditions))
+        val id = ids.newId()
+
+        if (lifecycle.finished || coroutineDispatcher.lifecycle.finished) {
+            return id
+        }
+
+        val command = IdContainer(id, RemoteQueueHandler.SyncCommand.Receive(key, conditions))
         val item = RemoteQueueHandler.QueueCommand.Add(command)
         _waiting.value = _waiting.value + item
         commandsQueue.add(Unit)
@@ -66,7 +73,13 @@ import kotlin.coroutines.CoroutineContext
     }
 
     override fun write(key: Key, command: Command): Id {
-        val syncCommand = IdContainer(ids.newId(), RemoteQueueHandler.SyncCommand.Send(key, command))
+        val id = ids.newId()
+
+        if (lifecycle.finished || coroutineDispatcher.lifecycle.finished) {
+            return id
+        }
+
+        val syncCommand = IdContainer(id, RemoteQueueHandler.SyncCommand.Send(key, command))
         val item = RemoteQueueHandler.QueueCommand.Add(syncCommand)
         _waiting.value = _waiting.value + item
         commandsQueue.add(Unit)
@@ -74,6 +87,10 @@ import kotlin.coroutines.CoroutineContext
     }
 
     override fun cancelCommand(commandId: Id) {
+        if (lifecycle.finished || coroutineDispatcher.lifecycle.finished) {
+            return
+        }
+
         val item = RemoteQueueHandler.QueueCommand.Remove<Key>(commandId)
         _waiting.value = _waiting.value + item
         commandsQueue.add(Unit)
@@ -101,7 +118,7 @@ import kotlin.coroutines.CoroutineContext
 
     private var active: Boolean = false
 
-    private val commandsQueue = BaseMessageQueueHandlerImpl<Unit>(lifecycle, queueContext, this::handleCommands)
+    private val commandsQueue = BaseMessageQueueHandlerImpl<Unit>(coroutineDispatcher, this::handleCommands)
 
     private suspend fun handleCommands(any: Unit) {
         while (_waiting.value.isNotEmpty() || _state.value.queue.isNotEmpty()) {
@@ -118,14 +135,14 @@ import kotlin.coroutines.CoroutineContext
                 continue
             }
 
-            handler(reduced, local.readOnlyAccess, this::writer)
+            handler(reduced, local.readOnly, this::writer)
         }
     }
 
     private suspend fun writer(
-        block: suspend (LocalRepository.Writer<Key, Value>) -> RemoteQueueHandler.State<StateData, Key, Command>
+        block: suspend (Repository.Writer<Key, Value>) -> RemoteQueueHandler.State<StateData, Key, Command>
     ) {
-        local.sole {
+        local.access {
             val state = block(it)
             _state.value = state
         }
