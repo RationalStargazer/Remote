@@ -3,7 +3,7 @@ package net.rationalstargazer.events
 import kotlinx.coroutines.CoroutineScope
 
 interface LifecycleBasedSimpleCoroutineDispatcher {
-    val lifecycle: LifecycleMarker
+    val lifecycle: RStaLifecycleMarker
     fun autoCancellableScope(): CoroutineScope?
     fun manuallyCancellableScope(): CoroutineScope?
 }

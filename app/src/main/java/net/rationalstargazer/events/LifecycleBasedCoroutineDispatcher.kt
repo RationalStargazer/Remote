@@ -8,11 +8,11 @@ import kotlinx.coroutines.job
 import kotlin.coroutines.CoroutineContext
 
 interface LifecycleBasedCoroutineDispatcher : LifecycleBasedSimpleCoroutineDispatcher {
-    override val lifecycle: Lifecycle
+    override val lifecycle: RStaLifecycle
 }
 
 class LifecycleBasedCoroutineDispatcherImpl(
-    override val lifecycle: Lifecycle,
+    override val lifecycle: RStaLifecycle,
     context: CoroutineContext
 ) : LifecycleBasedCoroutineDispatcher {
 

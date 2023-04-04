@@ -3,65 +3,41 @@ package net.rationalstargazer.events
 import net.rationalstargazer.ImmutableList
 import net.rationalstargazer.considerImmutable
 
-// interface LifecycleBased {
-//
-//     val finished: Boolean
-//
-//     fun listen(listener: Listener<Unit>)
-//
-//     fun listen(listenerLifecycle: Lifecycle, listener: () -> Unit) {
-//         listen(StdListener(listenerLifecycle) { listener() })
-//     }
-// }
-
-interface LifecycleMarker {
+interface RStaLifecycleMarker {
     val finished: Boolean
 }
 
-interface Lifecycle : LifecycleMarker {
+interface RStaLifecycleScope : RStaLifecycleMarker {
     val coordinator: RStaEventsQueueDispatcher
 
     override val finished: Boolean
 
     val consumed: Boolean
 
-    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listener: Listener<Unit>) {
-        listenBeforeFinish(callIfAlreadyFinished, listener.lifecycle, listener::notify)
+    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listener: RStaListener<Unit>) {
+        listenBeforeFinish(callIfAlreadyFinished, listener.lifecycleScope, listener::notify)
     }
 
-    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: (Unit) -> Unit)
+    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: RStaLifecycle, listenerFunction: (Unit) -> Unit)
 
-    //TODO: maybe removeListener will be implemented and at that time it will be important to keep exact function
-    //(not wrap them by convenient function)
-    // fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: () -> Unit) {
-    //     listenBeforeFinish(callIfAlreadyFinished, listenerLifecycle) { _ ->
-    //         listenerFunction()
-    //     }
-    // }
-
-    fun listenFinished(callIfAlreadyFinished: Boolean, listener: Listener<Unit>) {
-        listenFinished(callIfAlreadyFinished, listener.lifecycle, listener::notify)
+    fun listenFinished(callIfAlreadyFinished: Boolean, listener: RStaListener<Unit>) {
+        listenFinished(callIfAlreadyFinished, listener.lifecycleScope, listener::notify)
     }
 
-    fun listenFinished(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: (Unit) -> Unit)
+    fun listenFinished(callIfAlreadyFinished: Boolean, listenerLifecycle: RStaLifecycle, listenerFunction: (Unit) -> Unit)
 
-    //TODO: maybe removeListener will be implemented and at that time it will be important to keep exact function
-    // fun listenFinished(callIfAlreadyFinished: Boolean, listenerLifecycle: Lifecycle, listenerFunction: () -> Unit) {
-    //     listenFinished(callIfAlreadyFinished, listenerLifecycle) { _ ->
-    //         listenerFunction()
-    //     }
-    // }
-
-    fun watch(lifecycle: Lifecycle)
+    fun watch(lifecycle: RStaLifecycleScope)
 }
 
-interface HasLifecycle {
-    val lifecycle: Lifecycle
+interface RStaHasLifecycle {
+    val lifecycle: RStaLifecycle
 }
 
-interface SuspendableLifecycle {
+interface RStaLifecycle : RStaLifecycleScope
 
-    //val continuousLifecycle??
+interface RStaSuspendableLifecycle : RStaLifecycleScope {
+
+    val scope: RStaLifecycle
 
     val active: Boolean
 
@@ -72,9 +48,7 @@ interface SuspendableLifecycle {
     // }
 }
 
-interface ViewLifecycle : SuspendableLifecycle
-
-interface ControlledLifecycle : Lifecycle {
+interface RStaControlledLifecycle : RStaLifecycle {
 
     fun close()
 
@@ -82,9 +56,9 @@ interface ControlledLifecycle : Lifecycle {
     //fun close(onConsumed: () -> Unit)
 }
 
-class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) : ControlledLifecycle {
+class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) : RStaControlledLifecycle {
 
-    class Finished(override val coordinator: RStaEventsQueueDispatcher) : ControlledLifecycle {
+    class Finished(override val coordinator: RStaEventsQueueDispatcher) : RStaControlledLifecycle {
 
         override val finished: Boolean = true
 
@@ -92,7 +66,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
 
         override fun listenBeforeFinish(
             callIfAlreadyFinished: Boolean,
-            listenerLifecycle: Lifecycle,
+            listenerLifecycle: RStaLifecycle,
             listenerFunction: (Unit) -> Unit
         ) {
             if (callIfAlreadyFinished) {
@@ -103,7 +77,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
 
         override fun listenFinished(
             callIfAlreadyFinished: Boolean,
-            listenerLifecycle: Lifecycle,
+            listenerLifecycle: RStaLifecycle,
             listenerFunction: (Unit) -> Unit
         ) {
             if (callIfAlreadyFinished) {
@@ -112,7 +86,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
             }
         }
 
-        override fun watch(lifecycle: Lifecycle) {
+        override fun watch(lifecycle: RStaLifecycleScope) {
             // do nothing
         }
 
@@ -149,7 +123,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
 
     override fun listenBeforeFinish(
         callIfAlreadyFinished: Boolean,
-        listenerLifecycle: Lifecycle,
+        listenerLifecycle: RStaLifecycle,
         listenerFunction: (Unit) -> Unit
     ) {
         if (finished) {
@@ -171,7 +145,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
 
     override fun listenFinished(
         callIfAlreadyFinished: Boolean,
-        listenerLifecycle: Lifecycle,
+        listenerLifecycle: RStaLifecycle,
         listenerFunction: (Unit) -> Unit
     ) {
         if (finished) {
@@ -199,7 +173,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
     //     startClose(onConsumed)
     // }
 
-    override fun watch(lifecycle: Lifecycle) {
+    override fun watch(lifecycle: RStaLifecycleScope) {
         if (consumed) {
             return
         }
@@ -283,11 +257,11 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
 
     private val beforeFinishRegistry = ManualRegistry<Unit>(this)
     private val finishedRegistry = ManualRegistry<Unit>(this)
-    private val connectedLifecycles = mutableSetOf<Lifecycle>()
+    private val connectedLifecycles = mutableSetOf<RStaLifecycleScope>()
 
-    private class ManualRegistry<T>(private val mainLifecycle: Lifecycle) {
+    private class ManualRegistry<T>(private val mainLifecycle: RStaLifecycleScope) {
 
-        fun add(listenerLifecycle: Lifecycle, listenerFunction: (T) -> Unit) {
+        fun add(listenerLifecycle: RStaLifecycleScope, listenerFunction: (T) -> Unit) {
             if (listenerLifecycle == mainLifecycle) {
                 mainListeners.add(listenerFunction)
                 return
@@ -310,7 +284,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
             }
         }
 
-        fun clear(lifecycle: Lifecycle) {
+        fun clear(lifecycle: RStaLifecycleScope) {
             if (lifecycle == mainLifecycle) {
                 mainListeners.clear()
                 return
@@ -329,7 +303,7 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
             return list.considerImmutable()
         }
 
-        fun otherLifecycles(): ImmutableList<Lifecycle> {
+        fun otherLifecycles(): ImmutableList<RStaLifecycleScope> {
             return otherListeners.keys.toList().considerImmutable()
         }
 
@@ -345,17 +319,17 @@ class LifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) :
         }
 
         private val mainListeners: MutableList<(T) -> Unit> = mutableListOf()
-        private val otherListeners: MutableMap<Lifecycle, MutableList<(T) -> Unit>> = mutableMapOf()
+        private val otherListeners: MutableMap<RStaLifecycleScope, MutableList<(T) -> Unit>> = mutableMapOf()
     }
 }
 
-class NestedLifecycle private constructor(private val base: ControlledLifecycle) : ControlledLifecycle by base {
+class RStaNestedLifecycle private constructor(private val base: RStaControlledLifecycle) : RStaControlledLifecycle by base {
 
-    constructor(outerLifecycle: Lifecycle) : this(
+    constructor(outerLifecycle: RStaLifecycleScope) : this(
         if (outerLifecycle.finished) {
-            LifecycleDispatcher.Finished(outerLifecycle.coordinator)
+            RStaLifecycleDispatcher.Finished(outerLifecycle.coordinator)
         } else {
-            LifecycleDispatcher(outerLifecycle.coordinator)
+            RStaLifecycleDispatcher(outerLifecycle.coordinator)
         }
     ) {
         if (!outerLifecycle.finished) {
@@ -366,11 +340,11 @@ class NestedLifecycle private constructor(private val base: ControlledLifecycle)
     }
 }
 
-object IntersectionLifecycle {
+object RStaIntersectionLifecycle {
 
-    fun get(coordinator: RStaEventsQueueDispatcher, lifecycles: ImmutableList<Lifecycle>): Lifecycle {
+    fun get(coordinator: RStaEventsQueueDispatcher, lifecycles: List<RStaLifecycle>): RStaLifecycle {
         if (lifecycles.isEmpty() || lifecycles.any { it.finished }) {
-            return LifecycleDispatcher.Finished(coordinator)
+            return RStaLifecycleDispatcher.Finished(coordinator)
         }
 
         val first = lifecycles[0]
@@ -379,7 +353,7 @@ object IntersectionLifecycle {
             return first
         }
 
-        val dispatcher = LifecycleDispatcher(coordinator)
+        val dispatcher = RStaLifecycleDispatcher(coordinator)
         lifecycles.forEach {
             it.listenBeforeFinish(true, dispatcher) {
                 dispatcher.close()

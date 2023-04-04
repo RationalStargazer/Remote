@@ -1,13 +1,13 @@
 package net.rationalstargazer.remote.sync
 
-import net.rationalstargazer.events.Lifecycle
 import net.rationalstargazer.events.LifecycleBasedSimpleCoroutineDispatcher
+import net.rationalstargazer.events.RStaLifecycle
 import net.rationalstargazer.events.RStaValue
 import net.rationalstargazer.events.ValueDispatcher
 import net.rationalstargazer.logic.BaseMessageQueueHandlerImpl
 
 class BaseWritableRemoteComplexDataSourceImpl<StateData, Key, Value, Command>(
-    private val lifecycle: Lifecycle,
+    private val lifecycle: RStaLifecycle,
     private val coroutineDispatcher: LifecycleBasedSimpleCoroutineDispatcher,
     private val local: Repository.WriteAccess<Key, Value>,
     private val startNow: Boolean,
