@@ -2,10 +2,9 @@ package net.rationalstargazer.events.value
 
 import net.rationalstargazer.events.RStaEventSource
 import net.rationalstargazer.events.RStaListener
-import net.rationalstargazer.events.lifecycle.RStaHasLifecycle
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
-interface RStaValueEventSource<out T> : RStaHasLifecycle {
+interface RStaValueEventSource<out T> {
 
     enum class Invoke { YesNow, YesEnqueue, No }
 

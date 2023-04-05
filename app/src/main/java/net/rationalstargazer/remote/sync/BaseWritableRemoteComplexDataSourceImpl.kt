@@ -120,7 +120,7 @@ class BaseWritableRemoteComplexDataSourceImpl<StateData, Key, Value, Command>(
 
     private val commandsQueue = BaseMessageQueueHandlerImpl<Unit>(coroutineDispatcher, this::handleCommands)
 
-    private suspend fun handleCommands(any: Unit) {
+    private suspend fun handleCommands(@Suppress("UNUSED_PARAMETER") any: Unit) {
         while (_waiting.value.isNotEmpty() || _state.value.queue.isNotEmpty()) {
             val reduced = if (_waiting.value.isEmpty()) {
                 _state.value

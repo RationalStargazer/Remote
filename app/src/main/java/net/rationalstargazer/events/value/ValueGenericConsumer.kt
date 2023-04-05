@@ -5,7 +5,7 @@ import net.rationalstargazer.events.RStaListenersRegistry
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
 class ValueGenericConsumer<Value : Event, Event>(
-    override val lifecycle: RStaLifecycle,
+    val lifecycle: RStaLifecycle,
     defaultValue: Value,
     private val skipSameValue: Boolean,
     private val assignValueImmediately: Boolean,

@@ -1,14 +1,11 @@
 package net.rationalstargazer.events.value
 
 import net.rationalstargazer.events.RStaEventSource
-import net.rationalstargazer.events.RStaListener
 import net.rationalstargazer.events.RStaListenersRegistry
-import net.rationalstargazer.events.lifecycle.RStaHasLifecycle
-import net.rationalstargazer.events.lifecycle.RStaIntersectionLifecycle
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
 class FunctionalValue<out Value : Event, Event>(
-    override val lifecycle: RStaLifecycle,
+    val lifecycle: RStaLifecycle,
     valueGeneration: () -> Long,
     function: () -> Value
 ) : RStaGenericValue<Value, Event> {
@@ -101,7 +98,8 @@ class FunctionalValue<out Value : Event, Event>(
     init {
         lifecycle.listenBeforeFinish(true, lifecycle) {
             if (cachedGeneration == null) {
-                val v = value  // reading to create cache
+                @Suppress("UNUSED_VARIABLE")  // reading to create cache
+                val v = value
             }
         }
 

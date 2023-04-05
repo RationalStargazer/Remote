@@ -1,9 +1,10 @@
 package net.rationalstargazer.events
 
-import net.rationalstargazer.events.lifecycle.RStaHasLifecycle
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
-interface RStaEventSource<out T> : RStaHasLifecycle {
+interface RStaEventSource<out T> {
+
+    val lifecycle: RStaLifecycle
 
     fun listen(listener: RStaListener<T>) {
         listen(listener.lifecycleScope, listener::notify)

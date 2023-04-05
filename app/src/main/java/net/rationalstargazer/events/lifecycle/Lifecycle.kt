@@ -29,9 +29,9 @@ interface RStaLifecycleScope : RStaLifecycleMarker {
     fun watch(lifecycle: RStaLifecycleScope)
 }
 
-interface RStaHasLifecycle {
-    val lifecycle: RStaLifecycle
-}
+// interface RStaHasLifecycle {
+//     val lifecycle: RStaLifecycle
+// }
 
 interface RStaLifecycle : RStaLifecycleScope
 
