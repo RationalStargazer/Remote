@@ -1,6 +1,6 @@
 package net.rationalstargazer.remote.sync
 
-import net.rationalstargazer.ImmutableList
+import net.rationalstargazer.types.ImmutableList
 
 @JvmInline
 value class Id private constructor(val value: Int) {

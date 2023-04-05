@@ -1,8 +1,8 @@
 package net.rationalstargazer.logic
 
 import kotlinx.coroutines.launch
-import net.rationalstargazer.ImmutableList
-import net.rationalstargazer.events.LifecycleBasedSimpleCoroutineDispatcher
+import net.rationalstargazer.types.ImmutableList
+import net.rationalstargazer.events.lifecycle.LifecycleBasedSimpleCoroutineDispatcher
 
 interface BaseMessageQueueHandler<Message> {
 

@@ -1,7 +1,7 @@
 package net.rationalstargazer.events.android
 
 import android.os.Handler
-import net.rationalstargazer.events.RStaQueueGenericHandler
+import net.rationalstargazer.events.queue.RStaQueueGenericHandler
 
 class RStaAndroidLooperHandler(androidHandler: Handler) : RStaQueueGenericHandler {
 

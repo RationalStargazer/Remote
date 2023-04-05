@@ -1,4 +1,4 @@
-package net.rationalstargazer.events
+package net.rationalstargazer.events.lifecycle
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job

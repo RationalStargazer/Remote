@@ -1,4 +1,4 @@
-package net.rationalstargazer.events.android
+package net.rationalstargazer.events.android.lifecycle
 
 // import androidx.activity.ComponentActivity
 // import androidx.lifecycle.DefaultLifecycleObserver

@@ -1,60 +1,8 @@
-package net.rationalstargazer.events
+package net.rationalstargazer.events.lifecycle
 
-import net.rationalstargazer.ImmutableList
-import net.rationalstargazer.considerImmutable
-
-interface RStaLifecycleMarker {
-    val finished: Boolean
-}
-
-interface RStaLifecycleScope : RStaLifecycleMarker {
-    val coordinator: RStaEventsQueueDispatcher
-
-    override val finished: Boolean
-
-    val consumed: Boolean
-
-    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listener: RStaListener<Unit>) {
-        listenBeforeFinish(callIfAlreadyFinished, listener.lifecycleScope, listener::notify)
-    }
-
-    fun listenBeforeFinish(callIfAlreadyFinished: Boolean, listenerLifecycle: RStaLifecycle, listenerFunction: (Unit) -> Unit)
-
-    fun listenFinished(callIfAlreadyFinished: Boolean, listener: RStaListener<Unit>) {
-        listenFinished(callIfAlreadyFinished, listener.lifecycleScope, listener::notify)
-    }
-
-    fun listenFinished(callIfAlreadyFinished: Boolean, listenerLifecycle: RStaLifecycle, listenerFunction: (Unit) -> Unit)
-
-    fun watch(lifecycle: RStaLifecycleScope)
-}
-
-interface RStaHasLifecycle {
-    val lifecycle: RStaLifecycle
-}
-
-interface RStaLifecycle : RStaLifecycleScope
-
-interface RStaSuspendableLifecycle : RStaLifecycleScope {
-
-    val scope: RStaLifecycle
-
-    val active: Boolean
-
-    // fun listenStateChange(listener: Listener<Boolean>)
-    //
-    // fun listenStateChange(listenerLifecycle: Lifecycle, listener: (value: Boolean) -> Unit) {
-    //     listenStateChange(StdListener(listenerLifecycle, listener))
-    // }
-}
-
-interface RStaControlledLifecycle : RStaLifecycle {
-
-    fun close()
-
-    // TODO: not implemented yet
-    //fun close(onConsumed: () -> Unit)
-}
+import net.rationalstargazer.types.ImmutableList
+import net.rationalstargazer.types.considerImmutable
+import net.rationalstargazer.events.queue.RStaEventsQueueDispatcher
 
 class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) : RStaControlledLifecycle {
 
@@ -320,47 +268,6 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
 
         private val mainListeners: MutableList<(T) -> Unit> = mutableListOf()
         private val otherListeners: MutableMap<RStaLifecycleScope, MutableList<(T) -> Unit>> = mutableMapOf()
-    }
-}
-
-class RStaNestedLifecycle private constructor(private val base: RStaControlledLifecycle) : RStaControlledLifecycle by base {
-
-    constructor(outerLifecycle: RStaLifecycleScope) : this(
-        if (outerLifecycle.finished) {
-            RStaLifecycleDispatcher.Finished(outerLifecycle.coordinator)
-        } else {
-            RStaLifecycleDispatcher(outerLifecycle.coordinator)
-        }
-    ) {
-        if (!outerLifecycle.finished) {
-            outerLifecycle.listenBeforeFinish(true, base) {
-                base.close()
-            }
-        }
-    }
-}
-
-object RStaIntersectionLifecycle {
-
-    fun get(coordinator: RStaEventsQueueDispatcher, lifecycles: List<RStaLifecycle>): RStaLifecycle {
-        if (lifecycles.isEmpty() || lifecycles.any { it.finished }) {
-            return RStaLifecycleDispatcher.Finished(coordinator)
-        }
-
-        val first = lifecycles[0]
-
-        if (lifecycles.all { it == first }) {
-            return first
-        }
-
-        val dispatcher = RStaLifecycleDispatcher(coordinator)
-        lifecycles.forEach {
-            it.listenBeforeFinish(true, dispatcher) {
-                dispatcher.close()
-            }
-        }
-
-        return dispatcher
     }
 }
 

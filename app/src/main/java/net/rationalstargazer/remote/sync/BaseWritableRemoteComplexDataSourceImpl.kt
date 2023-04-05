@@ -1,9 +1,9 @@
 package net.rationalstargazer.remote.sync
 
-import net.rationalstargazer.events.LifecycleBasedSimpleCoroutineDispatcher
-import net.rationalstargazer.events.RStaLifecycle
-import net.rationalstargazer.events.RStaValue
-import net.rationalstargazer.events.ValueDispatcher
+import net.rationalstargazer.events.lifecycle.LifecycleBasedSimpleCoroutineDispatcher
+import net.rationalstargazer.events.lifecycle.RStaLifecycle
+import net.rationalstargazer.events.value.RStaValue
+import net.rationalstargazer.events.value.ValueDispatcher
 import net.rationalstargazer.logic.BaseMessageQueueHandlerImpl
 
 class BaseWritableRemoteComplexDataSourceImpl<StateData, Key, Value, Command>(

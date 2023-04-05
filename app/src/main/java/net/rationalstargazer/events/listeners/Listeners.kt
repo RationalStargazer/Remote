@@ -1,7 +1,5 @@
-package net.rationalstargazer.events
+package net.rationalstargazer.events.listeners
 
-// import java.lang.ref.WeakReference
-//
 // class ListenerSkipWhenInactive<T>(
 //     lifecycle: ViewLifecycle,
 //     listenerFunction: (T) -> Unit
