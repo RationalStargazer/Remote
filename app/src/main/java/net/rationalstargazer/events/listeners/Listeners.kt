@@ -1,126 +1,53 @@
 package net.rationalstargazer.events.listeners
 
+import net.rationalstargazer.events.lifecycle.RStaSuspendableLifecycle
+import net.rationalstargazer.events.value.RStaValueEventSource
+import net.rationalstargazer.events.value.RStaValueSource
+
 // class ListenerSkipWhenInactive<T>(
-//     lifecycle: ViewLifecycle,
-//     listenerFunction: (T) -> Unit
-// ) : ListenerBase<T>(lifecycle, listenerFunction) {
+//     private val lifecycle: RStaSuspendableLifecycle,
+//     private val listenerFunction: (T) -> Unit
+// ) : RStaListener<T> {
 //
-//     override fun doNotify(value: T) {
-//         if (lifecycle.get()?.active == true) {
-//             listener?.invoke(value)
+// 	override val lifecycleScope: RStaLifecycle = lifecycle.scope
+//
+//     override fun notify(value: T) {
+//         if (lifecycle.active.value) {
+//             listenerFunction(value)
 //         }
-//     }
-//
-//     override fun onFinish() {
-//         // nothing to do
 //     }
 // }
-//
-// class ValueConsumer<T> constructor(
-//     lifecycle: ViewLifecycle,
-//     source: SignalValue<T>,
-//     consumeFirstValueImmediately: Boolean,
-//     handler: (T) -> Unit
-// ) {
-//
-//     constructor(
-//         lifecycle: ViewLifecycle,
-//         source: SignalValue<T>,
-//         handler: (T) -> Unit
-//     ) : this(lifecycle, source, true, handler)
-//
-//     init {
-//         val listener = ListenerLiveData(lifecycle, handler)
-//         source.listen(listener)
-//
-//         if (consumeFirstValueImmediately) listener.notify(source.value)
-//     }
-//
-//     private class ListenerLiveData<T> constructor(
-//         lifecycle: ViewLifecycle,
-//         listenerFunction: (T) -> Unit
-//     ) : ListenerBase<T>(lifecycle, listenerFunction) {
-//
-//         override fun doNotify(value: T) {
-//             if (lifecycle.get()?.active == true) {
-//                 listener?.invoke(value)
-//             } else {
-//                 delayedValue = ValueHolder(value)
-//
-//                 if (!listeningChanges) {
-//                     lifecycle.get()?.let { l ->
-//                         listeningChanges = true
-//                         l.listenStateChange(ListenerSkipWhenInactive(l) {
-//                             if (l.active) {
-//                                 val v = delayedValue
-//                                 delayedValue = null
-//
-//                                 if (v != null) {
-//                                     listener?.invoke(v.value)
-//                                 }
-//                             }
-//                         })
-//                     }
-//                 }
-//             }
-//         }
-//
-//         override fun onFinish() {
-//             delayedValue = null
-//         }
-//
-//         private var delayedValue: ValueHolder<T>? = null
-//
-//         private var listeningChanges: Boolean = false
-//
-//         private data class ValueHolder<T>(val value: T)
-//     }
-// }
-//
-// abstract class ListenerBase<T>(lifecycle: ViewLifecycle, listenerFunction: (T) -> Unit) : Listener<T> {
-//
-//     protected open fun checkFinished(): Boolean = lifecycle.get()?.closed ?: true
-//
-//     protected abstract fun doNotify(value: T)
-//
-//     protected abstract fun onFinish()
-//
-//     final override val finished: Boolean get() {
-//         if (mFinished) return true
-//
-//         if (checkFinished()) {
-//             finish()
-//         }
-//
-//         return mFinished
-//     }
-//
-//     final override fun notify(value: T) {
-//         if (mFinished) {
-//             return
-//         }
-//
-//         if (checkFinished()) {
-//             finish()
-//             return
-//         }
-//
-//         doNotify(value)
-//     }
-//
-//     protected fun finish() {
-//         onFinish()
-//         mFinished = true
-//         lifecycle.clear()
-//         listener = null
-//     }
-//
-//     protected var mFinished = false
-//         private set
-//
-//     protected var lifecycle: WeakReference<ViewLifecycle> = WeakReference(lifecycle)
-//         private set
-//
-//     protected var listener: ((T) -> Unit)? = listenerFunction
-//         private set
-// }
+
+class RStaValueConsumer<T> constructor(
+    val lifecycle: RStaSuspendableLifecycle,
+    val source: RStaValueSource<T>,
+    consumeFirst: RStaValueEventSource.Invoke,
+    private val listenerFunction: (T) -> Unit
+) {
+	
+	private var delayedValue: T? = null
+	
+	private fun consume(value: Any?) {
+		if (lifecycle.active.value) {
+			delayedValue = null
+			listenerFunction(source.value)
+		} else {
+			delayedValue = source.value
+		}
+	}
+	
+	private fun activeStateListener(activeValue: Boolean) {
+		if (lifecycle.active.value) {
+			val value = delayedValue
+			if (value != null) {
+				delayedValue = null
+				listenerFunction(value)
+			}
+		}
+	}
+	
+	init {
+		source.listen(consumeFirst, lifecycle.scope, ::consume)
+        lifecycle.active.listen(RStaValueEventSource.Invoke.No, lifecycle.scope, ::activeStateListener)
+    }
+}

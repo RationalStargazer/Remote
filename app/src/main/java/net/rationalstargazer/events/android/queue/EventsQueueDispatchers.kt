@@ -1,4 +1,4 @@
-package net.rationalstargazer.events.android
+package net.rationalstargazer.events.android.queue
 
 import android.os.Handler
 import net.rationalstargazer.events.queue.RStaQueueGenericHandler

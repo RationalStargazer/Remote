@@ -172,10 +172,6 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
         coordinator.enqueue(this::handleTail, onConsumed)
     }
 
-    private fun handleTail(any: Unit) {
-        handleTail()
-    }
-
     private fun handleTail() {
         val beforeFinishedListeners = beforeFinishRegistry.allListeners()
         if (beforeFinishedListeners.isNotEmpty()) {

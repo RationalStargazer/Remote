@@ -1,22 +1,26 @@
 package net.rationalstargazer.events.queue
 
-object RStaEventsQueueDispatcherFactory {
 
-    /**
-     * Creates new [RStaEventsQueueDispatcher] based on fresh (`queueHandler.inited == false`) `queueHandler`.
-     * The call does [RStaQueueGenericHandler.init] with the values required for `RStaEventsQueueDispatcher`.
-     * It means you can't use the same `queueHandler` for multiple RStaEventsQueueDispatcher-s.
-     * @return null if `queueHandler.inited` is already true
-     */
-    fun createEventsQueue(queueHandler: RStaQueueGenericHandler): RStaEventsQueueDispatcher? {
-        if (queueHandler.inited) {
-            return null
-        }
-
-        return EventsQueueDispatcherImpl(queueHandler)
-    }
-}
-
+/**
+ * Provides the ability to enqueue `block` of code to be executed in near future.
+ * Enqueued blocks form a queue (first in first out).
+ * Blocks are executed sequentially one after another.
+ *
+ * Used by event sources to enqueue events.
+ *
+ * This approach removes a possibility of interleaving of events making them more natural and easier to predict:
+ *
+ * - Scheduling events doesn't lead to an interruption of control flow (comparing to direct function call).
+ *
+ * - Events that were scheduled earlier will be handled earlier
+ *
+ * - All listeners of an event will be executed before the listeners of the next event will be started;
+ *
+ * It is supposed that different threads should use their own instances of `RStaEventsQueueDispatcher`.
+ * Current implementation doesn't have any thread-switching (or thread-synchronizing) logic.
+ * Calling methods of the instance from another thread (other than the one it is bound to) is highly discouraged.
+ * Current implementations of event sources and observable values are supposed to work on a single thread.
+ */
 interface RStaEventsQueueDispatcher {
 
     /**
@@ -48,31 +52,5 @@ interface RStaEventsQueueDispatcher {
      */
     fun enqueue(block: () -> Unit) {
         enqueue(block, null)
-    }
-}
-
-private class EventsQueueDispatcherImpl(
-    private val queueHandler: RStaQueueGenericHandler
-) : RStaEventsQueueDispatcher {
-
-    override fun enqueue(block: () -> Unit, afterHandled: (() -> Unit)?) {
-        if (afterHandled != null) {
-            callbacks.add(afterHandled)
-        }
-
-        queueHandler.post(block)
-    }
-
-    private val callbacks: MutableList<() -> Unit> = mutableListOf()
-
-    private fun startCallbacks() {
-        val f = callbacks.removeLastOrNull()
-        if (f != null) {
-            queueHandler.post(f)
-        }
-    }
-
-    init {
-        queueHandler.init(this::startCallbacks)
     }
 }
