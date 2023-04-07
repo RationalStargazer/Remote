@@ -1,8 +1,9 @@
 package net.rationalstargazer.events.value
 
 import net.rationalstargazer.events.RStaEventSource
-import net.rationalstargazer.events.lifecycle.RStaIntersectionLifecycle
+import net.rationalstargazer.events.lifecycle.Lifecycles
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
+import net.rationalstargazer.events.lifecycle.whileAll
 
 class ChainGenericItem<out Value : Event, Event, SourceEvent>(
     private val base: FunctionalValue<Value, Event>
@@ -30,7 +31,7 @@ class ChainGenericItem<out Value : Event, Event, SourceEvent>(
         function: () -> Value
     ) : this(
         FunctionalValue(
-            RStaIntersectionLifecycle.get(lifecycle.coordinator, listOf(lifecycle, upstreamChangeSource.lifecycle)),
+            Lifecycles.whileAll(lifecycle.coordinator, listOf(lifecycle, upstreamChangeSource.lifecycle)),
             valueGeneration,
             function
         )
@@ -64,7 +65,7 @@ class ChainGenericItem<out Value : Event, Event, SourceEvent>(
         function: () -> Value
     ) : this(
         FunctionalValue(
-            RStaIntersectionLifecycle.get(lifecycle.coordinator, listOf(lifecycle, upstreamChangeSource.lifecycle)),
+            Lifecycles.whileAll(lifecycle.coordinator, listOf(lifecycle, upstreamChangeSource.lifecycle)),
             valueGeneration,
             function
         )

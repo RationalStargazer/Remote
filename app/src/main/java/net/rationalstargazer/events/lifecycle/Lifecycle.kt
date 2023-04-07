@@ -96,29 +96,29 @@ interface RStaLifecycleScope : RStaLifecycleMarker {
 	}
 	
 	/**
-	 * Adds the `listenerFunction` that will be called during the lifecycle's finishing process before the lifecycle will be considered `finished`.
+	 * Adds the `listener` that will be called during the lifecycle's finishing process before the lifecycle will be considered `finished`.
 	 * First, all listeners will be executed, then [finished] property will become `true`.
 	 * (See [RStaLifecycleScope] for detailed explanation of the finishing process)
 	 *
-	 * @param callIfAlreadyFinished If `true` the `listenerFunction` will be called (enqueued as usually) even if the lifecycle is already finished
-	 * If `false` the `listenerFunction` will not be called (completely ignored) if the lifecycle is already finished.
+	 * @param callIfAlreadyFinished If `true` the `listener` will be called (enqueued as usually) even if the lifecycle is already finished
+	 * If `false` the `listener` will not be called (completely ignored) if the lifecycle is already finished.
 	 * If `false` and the listener is in the finishing stage but `finished` property is still `false`
 	 * (for example the lifecycle is waiting for the execution of all remaining `BeforeFinish` listeners)
-	 * the `listenerFunction` will be called.
+	 * the `listener` will be called.
 	 *
-	 * @param listenerLifecycle lifecycle of the [listenerFunction].
-	 * When `listenerLifecycle.finished` property will become `true` the `listenerFunction` will be considered "removed" from the listeners,
-	 * and the reference to `listenerFunction` will be removed shortly after that.
-	 * `listenerLifecycle.finished` check is done immediately before the call of 'listenerFunction',
+	 * @param listenerLifecycle lifecycle of the [listener].
+	 * When `listenerLifecycle.finished` property will become `true` the `listener` will be considered "removed" from the listeners,
+	 * and the reference to `listener` will be removed shortly after that.
+	 * `listenerLifecycle.finished` check is done immediately before the call of 'listener',
 	 * if 'listenerLifecycle.finished == true` no call will be made, except for when [callIfAlreadyFinished] is `true`.
-	 * If `callIfAlreadyFinished == true` the `listenerFunction` will be called regardless of `listenerLifecycle.finished`.
+	 * If `callIfAlreadyFinished == true` the `listener` will be called regardless of `listenerLifecycle.finished`.
 	 *
 	 * You can use `this` lifecycle as a `listenerLifecycle` parameter if you want to listen the lifecycle forever.
 	 */
 	fun listenBeforeFinish(
 		callIfAlreadyFinished: Boolean,
 		listenerLifecycle: RStaLifecycle,
-		listenerFunction: (Unit) -> Unit
+		listener: (Unit) -> Unit
 	)
 	
 	/**
@@ -129,27 +129,27 @@ interface RStaLifecycleScope : RStaLifecycleMarker {
 	}
 	
 	/**
-	 * Adds the `listenerFunction` as a callback that will be called soon after the lifecycle will be finished
+	 * Adds the `listener` as a callback that will be called soon after the lifecycle will be finished
 	 * ([finished] is `true`).
 	 * (See [RStaLifecycleScope] for detailed explanation of the finishing process)
 	 *
-	 * @param callIfAlreadyFinished If `true` the `listenerFunction` will be called (enqueued as usually) even if the lifecycle is already finished
-	 * If `false` and [finished] is `true` the `listenerFunction` will not be called.
+	 * @param callIfAlreadyFinished If `true` the `listener` will be called (enqueued as usually) even if the lifecycle is already finished
+	 * If `false` and [finished] is `true` the `listener` will not be called.
 	 *
-	 * @param listenerLifecycle lifecycle of the [listenerFunction].
-	 * When `listenerLifecycle.finished` property will become `true` the `listenerFunction` will be considered "removed" from the listeners,
-	 * and the reference to `listenerFunction` will be removed shortly after that.
+	 * @param listenerLifecycle lifecycle of the [listener].
+	 * When `listenerLifecycle.finished` property will become `true` the `listener` will be considered "removed" from the listeners,
+	 * and the reference to `listener` will be removed shortly after that.
 	 * `listenerLifecycle.finished` check is done just before `this` lifecycle's `finished` property will be set to `true`,
 	 * if 'listenerLifecycle.finished == true` no call will be made, except for when [callIfAlreadyFinished] is `true`.
-	 * If `callIfAlreadyFinished == true` the `listenerFunction` will be called regardless of `listenerLifecycle.finished`.
+	 * If `callIfAlreadyFinished == true` the `listener` will be called regardless of `listenerLifecycle.finished`.
 	 *
 	 * You can use `this` lifecycle as a `listenerLifecycle` parameter if you want to listen the lifecycle forever
-	 * (the `listenerFunction` will be called even though technically it will be made after the lifecycle has finished).
+	 * (the `listener` will be called even though technically it will be made after the lifecycle has finished).
 	 */
 	fun listenFinished(
 		callIfAlreadyFinished: Boolean,
 		listenerLifecycle: RStaLifecycle,
-		listenerFunction: (Unit) -> Unit
+		listener: (Unit) -> Unit
 	)
 	
 	/**

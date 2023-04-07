@@ -4,6 +4,10 @@ import net.rationalstargazer.events.lifecycle.RStaLifecycle
 import net.rationalstargazer.events.lifecycle.RStaLifecycleScope
 import net.rationalstargazer.events.value.RStaValueEventSource
 
+/**
+ * Can hold listeners as long as its lifecycle and lifecycles of the listeners are not finished.
+ * @param lifecycle Lifecycle of the listener itself.
+ */
 class RStaListenersRegistry<T>(
     lifecycle: RStaLifecycle
 ) {
@@ -11,7 +15,7 @@ class RStaListenersRegistry<T>(
     private val registryLifecycle: RStaLifecycle = lifecycle
 
     fun addWithoutInvoke(listenerLifecycle: RStaLifecycle, listenerFunction: (T) -> Unit) {
-        if (listenerLifecycle.finished) {
+        if (registryLifecycle.finished || listenerLifecycle.finished) {
             return
         }
 
@@ -32,6 +36,10 @@ class RStaListenersRegistry<T>(
         listenerLifecycle: RStaLifecycle,
         listenerFunction: (T) -> Unit
     ) {
+        if (listenerLifecycle.finished) {
+            return
+        }
+        
         addWithoutInvoke(listenerLifecycle, listenerFunction)
 
         when (invoke) {
@@ -51,6 +59,10 @@ class RStaListenersRegistry<T>(
         listenerLifecycle: RStaLifecycle,
         listenerFunction: (T) -> Unit
     ) {
+        if (registryLifecycle.finished || listenerLifecycle.finished) {
+            return
+        }
+        
         addWithoutInvoke(listenerLifecycle, listenerFunction)
 
         when (invoke) {

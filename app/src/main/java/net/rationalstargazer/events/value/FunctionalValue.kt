@@ -5,7 +5,7 @@ import net.rationalstargazer.events.RStaListenersRegistry
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
 class FunctionalValue<out Value : Event, Event>(
-    val lifecycle: RStaLifecycle,
+    override val lifecycle: RStaLifecycle,
     valueGeneration: () -> Long,
     function: () -> Value
 ) : RStaGenericValue<Value, Event> {

@@ -1,7 +1,7 @@
 package net.rationalstargazer.events.lifecycle
 
 /**
- * Manually closeable lifecycle
+ * Manually closeable lifecycle.
  */
 interface RStaControlledLifecycle : RStaLifecycle {
 	

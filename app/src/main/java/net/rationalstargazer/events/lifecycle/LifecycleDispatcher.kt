@@ -4,6 +4,11 @@ import net.rationalstargazer.types.ImmutableList
 import net.rationalstargazer.types.considerImmutable
 import net.rationalstargazer.events.queue.RStaEventsQueueDispatcher
 
+internal typealias LifecycleDispatcher = RStaLifecycleDispatcher
+
+/**
+ * Implementation of [RStaControlledLifecycle].
+ */
 class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatcher) : RStaControlledLifecycle {
 
     class Finished(override val coordinator: RStaEventsQueueDispatcher) : RStaControlledLifecycle {
@@ -15,10 +20,10 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
         override fun listenBeforeFinish(
             callIfAlreadyFinished: Boolean,
             listenerLifecycle: RStaLifecycle,
-            listenerFunction: (Unit) -> Unit
+            listener: (Unit) -> Unit
         ) {
             if (callIfAlreadyFinished) {
-                beforeFinishRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
+                beforeFinishRegistry.add(this, listener)  // lifecycle = this because lifecycle doesn't matter now
                 coordinator.enqueue(this::handleTail)
             }
         }
@@ -26,10 +31,10 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
         override fun listenFinished(
             callIfAlreadyFinished: Boolean,
             listenerLifecycle: RStaLifecycle,
-            listenerFunction: (Unit) -> Unit
+            listener: (Unit) -> Unit
         ) {
             if (callIfAlreadyFinished) {
-                finishedRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
+                finishedRegistry.add(this, listener)  // lifecycle = this because lifecycle doesn't matter now
                 coordinator.enqueue(this::handleTail)
             }
         }
@@ -72,11 +77,11 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
     override fun listenBeforeFinish(
         callIfAlreadyFinished: Boolean,
         listenerLifecycle: RStaLifecycle,
-        listenerFunction: (Unit) -> Unit
+        listener: (Unit) -> Unit
     ) {
         if (finished) {
             if (callIfAlreadyFinished) {
-                beforeFinishRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
+                beforeFinishRegistry.add(this, listener)  // lifecycle = this because lifecycle doesn't matter now
                 coordinator.enqueue(this::handleTail)
             }
 
@@ -88,17 +93,17 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
             listenerLifecycle.watch(this)
         }
 
-        beforeFinishRegistry.add(listenerLifecycle, listenerFunction)
+        beforeFinishRegistry.add(listenerLifecycle, listener)
     }
 
     override fun listenFinished(
         callIfAlreadyFinished: Boolean,
         listenerLifecycle: RStaLifecycle,
-        listenerFunction: (Unit) -> Unit
+        listener: (Unit) -> Unit
     ) {
         if (finished) {
             if (callIfAlreadyFinished) {
-                finishedRegistry.add(this, listenerFunction)  // lifecycle = this because lifecycle doesn't matter now
+                finishedRegistry.add(this, listener)  // lifecycle = this because lifecycle doesn't matter now
                 coordinator.enqueue(this::handleTail)
             }
 
@@ -110,7 +115,7 @@ class RStaLifecycleDispatcher(override val coordinator: RStaEventsQueueDispatche
             listenerLifecycle.watch(this)
         }
 
-        finishedRegistry.add(listenerLifecycle, listenerFunction)
+        finishedRegistry.add(listenerLifecycle, listener)
     }
 
     override fun close() {

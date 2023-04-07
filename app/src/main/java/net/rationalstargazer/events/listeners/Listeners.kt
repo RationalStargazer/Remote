@@ -18,6 +18,9 @@ import net.rationalstargazer.events.value.RStaValueSource
 //     }
 // }
 
+/**
+ * TODO: experimental
+ */
 class RStaValueConsumer<T> constructor(
     val lifecycle: RStaSuspendableLifecycle,
     val source: RStaValueSource<T>,
