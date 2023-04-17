@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="CompilerConfiguration">
-    <bytecodeTargetLevel target="11" />
+    <bytecodeTargetLevel target="1.7">
+      <module name="RationalStargazer.app" target="11" />
+      <module name="RationalStargazer.events-android" target="11" />
+      <module name="Remote.app" target="11" />
+      <module name="Remote.events-android" target="11" />
+      <module name="RemoteSliceRework.app" target="11" />
+      <module name="RemoteSliceRework.events-android" target="11" />
+    </bytecodeTargetLevel>
   </component>
 </project>

@@ -12,5 +12,11 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "RemoteSliceRework"
+rootProject.name = "Remote"
 include ':app'
+include ':events'
+include ':events-android'
+include ':events-coroutines'
+include ':rationalstargazer'
+include ':handling'
+include ':remote'
