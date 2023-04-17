@@ -15,7 +15,7 @@ class ValueMapper<out Value, in SourceValue> private constructor(
             lifecycle,
             source,
             mapper,
-            source::checkGeneration,
+            source::checkValue,
         ) {
             mapper(source.value)
         }

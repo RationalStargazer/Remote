@@ -3,20 +3,20 @@ package net.rationalstargazer.events.value
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
 class ValueDispatcher<T> private constructor(
-    private val handler: ValueGenericConsumer<T, T>
-) : RStaGenericValue<T, T> by handler {
+    private val handler: ValueGenericConsumer<T>
+) : RStaValue<T> by handler {
 
     constructor(
         lifecycle: RStaLifecycle,
         defaultValue: T,
-        handler: (ValueGenericConsumer.Dispatcher<T>) -> Unit = {}
+        handler: ((ValueGenericConsumer.ChangeData<T>) -> Unit)? = null
     ) : this(
         ValueGenericConsumer(
             lifecycle,
             defaultValue,
             skipSameValue = true,
             assignValueImmediately = true,
-            assignValueWhenFinished = true,
+            assignValueIfFinished = true,
             handler = handler
         )
     )

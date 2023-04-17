@@ -22,13 +22,6 @@ interface RStaValueEventSource<out T> {
     val lifecycle: RStaLifecycle
     
     /**
-     * See overloaded version for the details.
-     */
-    fun listen(invoke: Invoke, listener: RStaListener<T>) {
-        listen(invoke, listener.lifecycleScope, listener::notify)
-    }
-    
-    /**
      * Adds listener to the event source. See [RStaEventSource] for the information about events and lifecycles.
      *
      * If event source's [lifecycle] or listener's lifecycle is `finished`, the method does nothing regardless of `invoke` parameter.
@@ -38,7 +31,14 @@ interface RStaValueEventSource<out T> {
      * when `No` no call will be made until value will be changed.
      */
     fun listen(invoke: Invoke, lifecycle: RStaLifecycle, listener: (eventData: T) -> Unit)
-    
+
+    /**
+     * See overloaded version for the details.
+     */
+    fun listen(invoke: Invoke, listener: RStaListener<T>) {
+        listen(invoke, listener.lifecycleScope, listener::notify)
+    }
+
     /**
      * Represents `this` instance as [RStaEventSource].
      */

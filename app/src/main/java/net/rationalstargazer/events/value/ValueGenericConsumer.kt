@@ -4,42 +4,21 @@ import net.rationalstargazer.events.RStaEventSource
 import net.rationalstargazer.events.RStaListenersRegistry
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
-class ValueGenericConsumer<Value : Event, Event>(
+class ValueGenericConsumer<Value>(
     override val lifecycle: RStaLifecycle,
     defaultValue: Value,
     private val skipSameValue: Boolean,
     private val assignValueImmediately: Boolean,
-    private val assignValueWhenFinished: Boolean,
-    private val handler: (Dispatcher<Value>) -> Unit  //TODO: remove handler reference when lifecycle is finished
-): RStaGenericValue<Value, Event> {
+    private val assignValueIfFinished: Boolean,
+    private var handler: ((ChangeData<Value>) -> Unit)? = null
+) : RStaValue<Value> {
 
-    interface Dispatcher<T> {
+    data class ChangeData<T>(
+        val value: T,
         val prevValue: T
-        val valueAtTimeOfChange: T
-        fun dispatch()
-    }
+    )
 
-    private class DispatcherImpl<Value : Event, Event>(
-        private val listeners: RStaListenersRegistry<Event>,
-        override val prevValue: Value,
-        override val valueAtTimeOfChange: Value
-    ) : Dispatcher<Value> {
-
-        var dispatched: Boolean = false
-            private set
-
-        override fun dispatch() {
-            if (dispatched) {
-                return
-            }
-
-            dispatched = true
-
-            listeners.enqueueEvent(valueAtTimeOfChange)
-        }
-    }
-
-    override fun checkGeneration(): Long {
+    override fun checkValue(): Long {
         return valueGeneration
     }
 
@@ -47,7 +26,7 @@ class ValueGenericConsumer<Value : Event, Event>(
         private set
 
     fun set(value: Value) {
-        if (lifecycle.finished && !assignValueWhenFinished) {
+        if (lifecycle.finished && !assignValueIfFinished) {
             return
         }
 
@@ -55,7 +34,7 @@ class ValueGenericConsumer<Value : Event, Event>(
             return
         }
 
-        val dispatcher = DispatcherImpl(listeners, this.value, value)
+        val data = ChangeData(this.value, value)
 
         if (assignValueImmediately) {
             valueGeneration++
@@ -63,10 +42,10 @@ class ValueGenericConsumer<Value : Event, Event>(
         }
 
         if (consumeInProgress) {
-            consumeQueue.add(dispatcher)
+            consumeQueue.add(data)
         } else {
             consumeInProgress = true
-            handleItem(dispatcher)
+            handleItem(data)
 
             while (consumeQueue.isNotEmpty()) {
                 handleItem(consumeQueue.removeFirst())
@@ -79,33 +58,41 @@ class ValueGenericConsumer<Value : Event, Event>(
     override fun listen(
         invoke: RStaValueEventSource.Invoke,
         lifecycle: RStaLifecycle,
-        listener: (eventData: Event) -> Unit
+        listener: (eventData: Value) -> Unit
     ) {
         listeners.add(invoke, value, lifecycle, listener)
     }
 
-    override fun asEventSource(): RStaEventSource<Event> {
+    override fun asEventSource(): RStaEventSource<Value> {
         return listeners.asEventSource()
     }
 
-    private val listeners = RStaListenersRegistry<Event>(lifecycle)
+    private val listeners = RStaListenersRegistry<Value>(lifecycle)
     private var valueGeneration: Long = 0
     private var consumeInProgress: Boolean = false
-    private val consumeQueue: MutableList<Dispatcher<Value>> = mutableListOf()
+    private val consumeQueue: MutableList<ChangeData<Value>> = mutableListOf()
 
-    private fun handleItem(dispatcher: Dispatcher<Value>) {
+    private fun handleItem(data: ChangeData<Value>) {
         if (!lifecycle.finished) {
             if (!assignValueImmediately) {
                 valueGeneration++
-                value = dispatcher.valueAtTimeOfChange
+                value = data.value
             }
 
-            handler(dispatcher)
-            dispatcher.dispatch()
+            handler?.invoke(data)
+            listeners.enqueueEvent(data.value)
         } else {
-            if (!assignValueImmediately && assignValueWhenFinished) {
+            if (!assignValueImmediately && assignValueIfFinished) {
                 valueGeneration++
-                value = dispatcher.valueAtTimeOfChange
+                value = data.value
+            }
+        }
+    }
+
+    init {
+        if (handler != null) {
+            lifecycle.listenFinished(true, lifecycle) {
+                handler = null
             }
         }
     }

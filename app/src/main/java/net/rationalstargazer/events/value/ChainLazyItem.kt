@@ -6,7 +6,7 @@ import net.rationalstargazer.events.lifecycle.RStaLifecycle
 import net.rationalstargazer.events.lifecycle.whileAll
 
 class ChainLazyItem<out Value>(
-    private val base: FunctionalValue<Value, Any?>
+    private val base: RStaDynamicValue<Value, Any?>
 ) : RStaGenericValue<Value, Any?> by base {
 
     constructor(
@@ -30,7 +30,7 @@ class ChainLazyItem<out Value>(
         valueGeneration: () -> Long,
         function: () -> Value
     ) : this(
-        FunctionalValue(
+        RStaDynamicValue(
             Lifecycles.whileAll(lifecycle.coordinator, listOf(lifecycle, upstreamChangeSource.lifecycle)),
             valueGeneration,
             function
@@ -62,7 +62,7 @@ class ChainLazyItem<out Value>(
         valueGeneration: () -> Long,
         function: () -> Value
     ) : this(
-        FunctionalValue(
+        RStaDynamicValue(
             Lifecycles.whileAll(lifecycle.coordinator, listOf(lifecycle, upstreamChangeSource.lifecycle)),
             valueGeneration,
             function

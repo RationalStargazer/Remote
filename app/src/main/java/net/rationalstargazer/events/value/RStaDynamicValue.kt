@@ -4,7 +4,7 @@ import net.rationalstargazer.events.RStaEventSource
 import net.rationalstargazer.events.RStaListenersRegistry
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
-class FunctionalValue<out Value : Event, Event>(
+class RStaDynamicValue<out Value : Event, Event>(
     override val lifecycle: RStaLifecycle,
     valueGeneration: () -> Long,
     function: () -> Value
@@ -44,14 +44,14 @@ class FunctionalValue<out Value : Event, Event>(
     //     }
     // }
 
-    override fun checkGeneration(): Long {
+    override fun checkValue(): Long {
         return generation?.invoke()
             ?: cachedGeneration!!  // cachedGeneration created before generation reference is cleared
     }
 
     override val value: Value
         get() {
-            val g = checkGeneration()
+            val g = checkValue()
             if (g == cachedGeneration) {
                 return cache!!.value  // g != null => cachedGeneration != null => cache exists
             }
