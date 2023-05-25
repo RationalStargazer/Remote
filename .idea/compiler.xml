@@ -4,10 +4,26 @@
     <bytecodeTargetLevel target="1.7">
       <module name="RationalStargazer.app" target="11" />
       <module name="RationalStargazer.events-android" target="11" />
-      <module name="Remote.app" target="11" />
+      <module name="Remote.app" target="17" />
+      <module name="Remote.events" target="1.8" />
       <module name="Remote.events-android" target="11" />
+      <module name="Remote.events-coroutines" target="1.8" />
+      <module name="Remote.events-coroutines.main" target="1.8" />
+      <module name="Remote.events-coroutines.test" target="1.8" />
+      <module name="Remote.events.main" target="1.8" />
+      <module name="Remote.handling" target="1.8" />
+      <module name="Remote.handling.main" target="1.8" />
+      <module name="Remote.handling.test" target="1.8" />
+      <module name="Remote.rationalstargazer" target="1.8" />
+      <module name="Remote.rationalstargazer.main" target="1.8" />
+      <module name="Remote.rationalstargazer.test" target="1.8" />
+      <module name="Remote.remote" target="1.8" />
+      <module name="Remote.remote-android" target="17" />
+      <module name="Remote.remote.main" target="1.8" />
+      <module name="Remote.remote.test" target="1.8" />
       <module name="RemoteSliceRework.app" target="11" />
       <module name="RemoteSliceRework.events-android" target="11" />
+      <module name="Stargazer.Remote.events.test" target="1.8" />
     </bytecodeTargetLevel>
   </component>
 </project>

@@ -4,7 +4,7 @@ import net.rationalstargazer.events.RStaEventSource
 import net.rationalstargazer.events.RStaListenersRegistry
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
-class ValueGenericConsumer<Value>(
+class RStaValueGenericConsumer<Value>(
     override val lifecycle: RStaLifecycle,
     defaultValue: Value,
     private val skipSameValue: Boolean,
@@ -18,8 +18,8 @@ class ValueGenericConsumer<Value>(
         val prevValue: T
     )
 
-    override fun checkValue(): Long {
-        return valueGeneration
+    override fun checkValueVersion(): Long {
+        return valueVersion
     }
 
     override var value: Value = defaultValue
@@ -37,7 +37,7 @@ class ValueGenericConsumer<Value>(
         val data = ChangeData(this.value, value)
 
         if (assignValueImmediately) {
-            valueGeneration++
+            valueVersion++
             this.value = value
         }
 
@@ -56,7 +56,7 @@ class ValueGenericConsumer<Value>(
     }
 
     override fun listen(
-        invoke: RStaValueEventSource.Invoke,
+        invoke: RStaListenerInvoke,
         lifecycle: RStaLifecycle,
         listener: (eventData: Value) -> Unit
     ) {
@@ -68,14 +68,14 @@ class ValueGenericConsumer<Value>(
     }
 
     private val listeners = RStaListenersRegistry<Value>(lifecycle)
-    private var valueGeneration: Long = 0
+    private var valueVersion: Long = 0
     private var consumeInProgress: Boolean = false
     private val consumeQueue: MutableList<ChangeData<Value>> = mutableListOf()
 
     private fun handleItem(data: ChangeData<Value>) {
         if (!lifecycle.finished) {
             if (!assignValueImmediately) {
-                valueGeneration++
+                valueVersion++
                 value = data.value
             }
 
@@ -83,7 +83,7 @@ class ValueGenericConsumer<Value>(
             listeners.enqueueEvent(data.value)
         } else {
             if (!assignValueImmediately && assignValueIfFinished) {
-                valueGeneration++
+                valueVersion++
                 value = data.value
             }
         }

@@ -1,60 +1,30 @@
 package net.rationalstargazer.events.value
 
+import net.rationalstargazer.events.Container
 import net.rationalstargazer.events.RStaEventSource
 import net.rationalstargazer.events.RStaListenersRegistry
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 
 class RStaDynamicValue<out Value : Event, Event>(
     override val lifecycle: RStaLifecycle,
-    valueGeneration: () -> Long,
-    function: () -> Value
+    private val skipSameEvent: Boolean,
+    valueVersion: () -> Long,
+    valueFunction: () -> Value
 ) : RStaGenericValue<Value, Event> {
 
-    // object EventBased {
-    //     fun <T> create(
-    //         lifecycle: Lifecycle,
-    //         changeEventSource: EventSource<Any>,
-    //         valueGeneration: () -> Long,
-    //         function: () -> T
-    //     ): FunctionalValue<T> {
-    //         val r = FunctionalValue<T>(lifecycle, valueGeneration, function)
-    //         changeEventSource.listen(lifecycle) { r.notifyChanged() }
-    //         if (changeEventSource.lifecycle != lifecycle) {
-    //             changeEventSource.lifecycle.listenBeforeFinish(true, lifecycle) {
-    //                 //TODO: actually source functions should be released here
-    //                 r.value  // read value to create cache
-    //             }
-    //         }
-    //
-    //         return r
-    //     }
-    //
-    //     fun <T> create(
-    //         lifecycle: Lifecycle,  //TODO: maybe also add default union lifecycle?
-    //         changeSources: List<EventSource<Any>>,
-    //         valueGeneration: () -> Long,
-    //         function: () -> T
-    //     ): FunctionalValue<T> {
-    //         val item = FunctionalValue<T>(lifecycle, valueGeneration, function)
-    //         changeSources.forEach {
-    //             it.listen(lifecycle) { item.notifyChanged() }
-    //         }
-    //
-    //         return item
-    //     }
-    // }
-
-    override fun checkValue(): Long {
-        return generation?.invoke()
-            ?: cachedGeneration!!  // cachedGeneration created before generation reference is cleared
+    override fun checkValueVersion(): Long {
+        return versionFunction?.invoke()
+            ?: cachedVersion!!  // cachedVersion created before versionFunction reference is cleared
     }
 
     override val value: Value
         get() {
-            val g = checkValue()
-            if (g == cachedGeneration) {
-                return cache!!.value  // g != null => cachedGeneration != null => cache exists
+            val ver = checkValueVersion()
+            if (ver == cachedVersion) {
+                return cache!!.value  // ver != null => cachedVersion != null => cache != null
             }
+
+            cachedVersion = ver
 
             val r = function!!.invoke()
 
@@ -62,20 +32,31 @@ class RStaDynamicValue<out Value : Event, Event>(
             if (c != null) {
                 c.value = r
             } else {
-                cache = Cache(r)
+                cache = Container(r)
             }
-
-            cachedGeneration = g
 
             return r
         }
 
     fun notifyChanged(eventData: Event) {
+        if (skipSameEvent) {
+            val last = lastEvent
+            if (last != null) {
+                if (last.value == eventData) {
+                    return
+                }
+
+                last.value = eventData
+            } else {
+                lastEvent = Container(eventData)
+            }
+        }
+
         listeners.enqueueEvent(eventData)
     }
 
     override fun listen(
-        invoke: RStaValueEventSource.Invoke,
+        invoke: RStaListenerInvoke,
         lifecycle: RStaLifecycle,
         listener: (eventData: Event) -> Unit
     ) {
@@ -86,25 +67,24 @@ class RStaDynamicValue<out Value : Event, Event>(
         return listeners.asEventSource()
     }
 
-    private var function: (() -> Value)? = function
-    private var generation: (() -> Long)? = valueGeneration
+    private var function: (() -> Value)? = valueFunction
+    private var versionFunction: (() -> Long)? = valueVersion
 
     private val listeners = RStaListenersRegistry<Event>(lifecycle)
-    private var cache: Cache<Value>? = null
-    private var cachedGeneration: Long? = null
-
-    class Cache<T>(var value: T)
+    private var lastEvent: Container<Event>? = null
+    private var cache: Container<Value>? = null
+    private var cachedVersion: Long? = null
 
     init {
         lifecycle.listenBeforeFinish(true, lifecycle) {
-            if (cachedGeneration == null) {
+            if (cachedVersion == null) {
                 @Suppress("UNUSED_VARIABLE")  // reading to create cache
                 val v = value
             }
         }
 
         lifecycle.listenFinished(true, lifecycle) {
-            generation = null
+            this.versionFunction = null
             this.function = null
         }
     }

@@ -25,15 +25,15 @@ import net.rationalstargazer.events.queue.RStaEventsQueueDispatcher
  * After event source's [lifecycle] will become `finished` all the listeners will be automatically removed.
  * When event source's `lifecycle.finished == true` no events will be scheduled from now on,
  * but it is possible that some events were already scheduled (and now are in the event's queue).
- * It means that the listener can be called when the `lifecycle.finished` is actually `true`.
+ * It means that a listener can be called when its `lifecycle.finished` is actually `true`.
  *
- * It is a part of the nature of the event system.
- * All events are always represent something that has happened in the past.
- * After that other events can happen, things can be different since.
+ * It is a nature of an event system.
+ * All events always represent something that has happened in the past.
+ * After that other events can happen before a listener will be called, things can be different since.
  * When you handle an event you may don't want to rely on the `eventData`,
  * instead you may prefer to get actual data and handle the situation according to it.
  *
- * When `lifecycle.consumed == true` it is guaranteed that all scheduled events were delivered and
+ * When `lifecycle.consumed == true` it is guaranteed that all scheduled events are been delivered and
  * no listeners will be called.
  */
 interface RStaEventSource<out T> {

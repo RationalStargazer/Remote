@@ -7,6 +7,7 @@ import net.rationalstargazer.events.value.RStaGenericValue
 
 /**
  * Represents continuous lifecycle which is the simplest variant of `lifecycle` (see [RStaLifecycleScope] for details).
+ *
  * Continuous lifecycle (or just "lifecycle" as it is the most common one) represents that the `thing` is active
  * (has been providing useful result) all the time since the creation of the `thing` and until the `lifecycle` will be finished.
  *
@@ -16,7 +17,7 @@ import net.rationalstargazer.events.value.RStaGenericValue
 interface RStaLifecycle : RStaLifecycleScope
 
 /**
- * Base class for continuous [RStaLifecycle] and suspendable [RStaSuspendableLifecycle] lifecycles.
+ * Base class for continuous ([RStaLifecycle]) and suspendable ([RStaSuspendableLifecycle]) lifecycles.
  *
  * Concept of `lifecycle` is used with event sources ([RStaEventSource]), observable values (see [RStaGenericValue]),
  * and other classes to automatically free resources when `lifecycle` is [finished].
@@ -33,7 +34,7 @@ interface RStaLifecycle : RStaLifecycleScope
  * Current implementations of event sources and observable values are supposed to work on a single thread.
  *
  * When lifecycle's life has ended the lifecycle calls `BeforeFinish` listeners,
- * then sets `finished` to `true` and calls `Finished` listeners (at the "same time", see explanation in all details below).
+ * then sets `finished` to `true` and calls `Finished` listeners (at the "same time", see the explanation in all details below).
  *
  * Finishing process in all details:
  *
@@ -41,17 +42,17 @@ interface RStaLifecycle : RStaLifecycleScope
  *
  * Then it builds the list of active `Finished` listeners (listeners whose `lifecycle.finished == false`).
  *
- * After that `finished` property will become `true`
- * (this sequence means you can use `this` lifecycle as a `Finished` listener's lifecycle and the listener will be called because `lifecycle.finished` check was made before `finished` became `true`).
+ * After that `finished` property will become `true`.
  *
  * Then the list of `Finished` listeners will be called.
+ *
+ * (This sequence means you can use `this` lifecycle as a `Finished` listener's lifecycle and the listener will be called because `lifecycle.finished` check was made before `finished` became `true`.)
  *
  * Then if there are unhandled `BeforeFinish` or `Finished` listeners
  * (that were added with the parameter `callIfAlreadyFinished == true` during the call of `Finished` listeners)
  * `BeforeFinish` listeners will be called first (including those were freshly added during the calls),
  * then `Finished` listeners will be called next.
- *
- * The procedure will be repeated until no unhandled listeners will be left.
+ * The execution of unhandled listeners will be repeated until no unhandled listeners will be left.
  *
  * Then [consumed] will be set to `true`.
  */

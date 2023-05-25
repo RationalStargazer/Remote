@@ -1,8 +1,10 @@
 package net.rationalstargazer.events.listeners
 
+import net.rationalstargazer.events.Container
+import net.rationalstargazer.events.RStaListener
+import net.rationalstargazer.events.lifecycle.RStaLifecycle
 import net.rationalstargazer.events.lifecycle.RStaSuspendableLifecycle
-import net.rationalstargazer.events.value.RStaValueEventSource
-import net.rationalstargazer.events.value.RStaValueSource
+import net.rationalstargazer.events.value.RStaListenerInvoke
 
 // class ListenerSkipWhenInactive<T>(
 //     private val lifecycle: RStaSuspendableLifecycle,
@@ -23,34 +25,37 @@ import net.rationalstargazer.events.value.RStaValueSource
  */
 class RStaValueConsumer<T> constructor(
     val lifecycle: RStaSuspendableLifecycle,
-    val source: RStaValueSource<T>,
-    consumeFirst: RStaValueEventSource.Invoke,
     private val listenerFunction: (T) -> Unit
-) {
-	
-	private var delayedValue: T? = null
-	
-	private fun consume(value: Any?) {
+): RStaListener<T> {
+
+	override val lifecycleScope: RStaLifecycle = lifecycle.scope
+
+	override fun notify(value: T) {
 		if (lifecycle.active.value) {
 			delayedValue = null
-			listenerFunction(source.value)
+			listenerFunction(value)
 		} else {
-			delayedValue = source.value
+			if (delayedValue != null) {
+				delayedValue!!.value = value
+			} else {
+				delayedValue = Container(value)
+			}
 		}
 	}
-	
+
+	private var delayedValue: Container<T>? = null
+
 	private fun activeStateListener(activeValue: Boolean) {
 		if (lifecycle.active.value) {
-			val value = delayedValue
-			if (value != null) {
+			val v = delayedValue
+			if (v != null) {
 				delayedValue = null
-				listenerFunction(value)
+				listenerFunction(v.value)
 			}
 		}
 	}
 	
 	init {
-		source.listen(consumeFirst, lifecycle.scope, ::consume)
-        lifecycle.active.listen(RStaValueEventSource.Invoke.No, lifecycle.scope, ::activeStateListener)
+		lifecycle.active.listen(RStaListenerInvoke.No, lifecycle.scope, ::activeStateListener)
     }
 }

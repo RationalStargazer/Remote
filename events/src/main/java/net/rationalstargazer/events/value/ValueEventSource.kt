@@ -14,8 +14,6 @@ import net.rationalstargazer.events.lifecycle.RStaLifecycle
  */
 interface RStaValueEventSource<out T> {
 
-    enum class Invoke { YesNow, YesEnqueue, No }
-    
     /**
      * See [RStaEventSource.lifecycle] for details.
      */
@@ -30,12 +28,12 @@ interface RStaValueEventSource<out T> {
      * when `YesEnqueue` the call of the `listener` will be enqueued with the value at the time of 'listen' method call;
      * when `No` no call will be made until value will be changed.
      */
-    fun listen(invoke: Invoke, lifecycle: RStaLifecycle, listener: (eventData: T) -> Unit)
+    fun listen(invoke: RStaListenerInvoke, lifecycle: RStaLifecycle, listener: (eventData: T) -> Unit)
 
     /**
      * See overloaded version for the details.
      */
-    fun listen(invoke: Invoke, listener: RStaListener<T>) {
+    fun listen(invoke: RStaListenerInvoke, listener: RStaListener<T>) {
         listen(invoke, listener.lifecycleScope, listener::notify)
     }
 

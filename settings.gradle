@@ -14,9 +14,9 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Remote"
 include ':app'
+include ':remote'
 include ':events'
-include ':events-android'
 include ':events-coroutines'
 include ':rationalstargazer'
 include ':handling'
-include ':remote'
+include ':remote-android'

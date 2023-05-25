@@ -2,7 +2,7 @@ package net.rationalstargazer.events
 
 import net.rationalstargazer.events.lifecycle.RStaLifecycle
 import net.rationalstargazer.events.lifecycle.RStaLifecycleScope
-import net.rationalstargazer.events.value.RStaValueEventSource
+import net.rationalstargazer.events.value.RStaListenerInvoke
 
 /**
  * Can hold listeners as long as its lifecycle and lifecycles of the listeners are not finished.
@@ -31,7 +31,7 @@ class RStaListenersRegistry<T>(
     }
 
     fun add(
-        invoke: RStaValueEventSource.Invoke,
+        invoke: RStaListenerInvoke,
         invokeValue: () -> T,
         listenerLifecycle: RStaLifecycle,
         listenerFunction: (T) -> Unit
@@ -43,18 +43,18 @@ class RStaListenersRegistry<T>(
         addWithoutInvoke(listenerLifecycle, listenerFunction)
 
         when (invoke) {
-            RStaValueEventSource.Invoke.YesNow -> listenerFunction(invokeValue())
+            RStaListenerInvoke.YesNow -> listenerFunction(invokeValue())
 
-            RStaValueEventSource.Invoke.YesEnqueue -> enqueueEvent(invokeValue())
+            RStaListenerInvoke.YesEnqueue -> enqueueEvent(invokeValue())
 
-            RStaValueEventSource.Invoke.No -> {
+            RStaListenerInvoke.No -> {
                 // do nothing
             }
         }
     }
 
     fun add(
-        invoke: RStaValueEventSource.Invoke,
+        invoke: RStaListenerInvoke,
         invokeValue: T,
         listenerLifecycle: RStaLifecycle,
         listenerFunction: (T) -> Unit
@@ -66,11 +66,11 @@ class RStaListenersRegistry<T>(
         addWithoutInvoke(listenerLifecycle, listenerFunction)
 
         when (invoke) {
-            RStaValueEventSource.Invoke.YesNow -> listenerFunction(invokeValue)
+            RStaListenerInvoke.YesNow -> listenerFunction(invokeValue)
 
-            RStaValueEventSource.Invoke.YesEnqueue -> enqueueEvent(invokeValue)
+            RStaListenerInvoke.YesEnqueue -> enqueueEvent(invokeValue)
 
-            RStaValueEventSource.Invoke.No -> {
+            RStaListenerInvoke.No -> {
                 // do nothing
             }
         }

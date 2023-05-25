@@ -3,6 +3,9 @@ package net.rationalstargazer.events.queue
 
 /**
  * Provides the ability to enqueue `block` of code to be executed in near future.
+ *
+ * On Android you can use [RStaEventsQueueDispatcherFactory.createEventsQueue] to instantiate standard implementation.
+ *
  * Enqueued blocks form a queue (first in first out).
  * Blocks are executed sequentially one after another.
  *
