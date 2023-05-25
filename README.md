@@ -34,4 +34,4 @@ Basic customizable implementation: [WritableRemoteComplexDataSourceImpl.kt](remo
 
 API: [repository](remote/src/main/java/net/rationalstargazer/remote/sync/BaseRemoteComplexDataSource.kt), [data classes](remote/src/main/java/net/rationalstargazer/remote/sync/RemoteQueueHandler.kt)
 
-Based on my [events and observable values](https://github.com/RationalStargazer/events)
+Based on my [Events and Observable Values](https://github.com/RationalStargazer/events)
