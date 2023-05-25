@@ -19,6 +19,10 @@ repository.write(key, ExampleWriteCommand(key, nextValue))
 repository.state.listen(lifecycle) { networkingState ->
     // here we can handle any of repository's changes
     // that were made as the result of sync(), write() or other similar calls
+    
+    // networkingState can be implemented to keep information about last network errors
+    // to provide feedback to a user and implement smart retry logic 
+    // that will not overwhelm server with infinite retry attempts if something goes wrong
 }
 ```
 
