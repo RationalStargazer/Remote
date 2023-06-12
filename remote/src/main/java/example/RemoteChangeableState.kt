@@ -10,7 +10,7 @@ sealed class RemoteChangeableState<out T: Any> {
     
     abstract val local: T?
     abstract val remote: RemoteState<T>
-    abstract val aheadInfo: Data.AheadInfo<T>?
+    abstract val aheadInfo: Data.AheadInfo?
     abstract val state: Data.State<T>
     
     data class NoData<out T : Any>(
@@ -32,7 +32,7 @@ sealed class RemoteChangeableState<out T: Any> {
     data class Data<out T : Any>(
         override val local: T,
         override val remote: RemoteState<T>,
-        override val aheadInfo: AheadInfo<T>?,
+        override val aheadInfo: AheadInfo?,
     ) : RemoteChangeableState<T>() {
         
         override val state: State<T>
@@ -64,7 +64,7 @@ sealed class RemoteChangeableState<out T: Any> {
             }
         }
         
-        data class AheadInfo<out T : Any>(
+        data class AheadInfo(
             val inProgress: Boolean,
             val lastError: RemoteData.Fail?,
             val problematic: Boolean
