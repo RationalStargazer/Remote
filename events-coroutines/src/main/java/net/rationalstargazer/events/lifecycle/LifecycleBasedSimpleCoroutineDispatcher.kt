@@ -4,5 +4,5 @@ import kotlinx.coroutines.CoroutineScope
 
 interface RStaLifecycleBasedSimpleCoroutineDispatcher {
     val lifecycle: RStaLifecycleMarker
-    fun manuallyCancellableScope(): CoroutineScope?
+    fun launchNonCancellable(block: suspend CoroutineScope.() -> Unit)
 }

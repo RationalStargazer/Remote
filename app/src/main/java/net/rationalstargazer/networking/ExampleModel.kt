@@ -1,6 +1,9 @@
 package net.rationalstargazer.networking
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
+import example.RemoteChangeableState
+import example.RemoteState
 import example.WritableSimpleRemoteDataSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -21,44 +24,67 @@ import kotlin.coroutines.CoroutineContext
 
 /**
  * Example of my programming.
+ *
+ * (In real world scenario a company may decide
+ * it is worth to have complete UDF architecture (to decouple action dispatchers from reducer)
+ * to reduce probability of programming errors which can be made by less experienced members of a team.
+ * This kind of example would be excessively complicated to show it here.)
  */
+
+/**
+ * Example data.
+ */
+data class ExampleData(val someThing: String, val anotherThing: String) {
+    fun mutate(key: ExampleKey, value: String): ExampleData {
+        return when (key) {
+            ExampleKey.SomeThing -> copy(someThing = value)
+            ExampleKey.AnotherThing -> copy(anotherThing = value)
+        }
+    }
+}
+
+enum class ExampleKey { SomeThing, AnotherThing }
 
 /**
  * The state that describes the data for view layer
  */
-data class ExampleState(
-    /**
-     * True when all data are loaded from the server
-     */
-    val loaded: Boolean,
+sealed class ExampleState {
+    object FirstLoad : ExampleState()
     
-    /**
-     * True when `loaded` is true and all data that should be sent were sent successfully
-     */
-    val synced: Boolean,
+    data class LoadFailed(val fail: RemoteData.Fail) : ExampleState()
     
-    /**
-     * Keeps last remote results to let a view layer explain what exactly went wrong.
-     * (it can be network problems, or for example server could decide that the data is invalid)
-     */
-    val lastRemoteResult: Map<ExampleKey, RemoteData<SendResult<Unit, ExampleDataRejectedReason>>>,
+    data class Data(
+        /**
+         * Values before they were edited
+         */
+        val initialValues: ExampleData,
     
-    /**
-     * Something we want to work with
-     */
-    val someThing: String?,
+        /**
+         * Current values
+         */
+        val values: ExampleData,
+        
+        val validationResult: Map<ExampleKey, ValidationResult>,
     
-    /**
-     * Another thing we want to work with
-     */
-    val anotherThing: String?
-) {
+        val submitResult: SubmitResult?,
+    ) : ExampleState() {
+        
+        val dataChanged: Boolean = initialValues != values
     
-    fun mutateExampleValue(key: ExampleKey, value: ExampleValue?): ExampleState {
-        return when (key) {
-            ExampleKey.SomeThing -> copy(someThing = value?.exampleData)
-            ExampleKey.AnotherThing -> copy(anotherThing = value?.exampleData)
-        }
+        val submitButtonEnabled: Boolean = dataChanged
+    }
+    
+    data class Submitting(
+        val initialValues: ExampleData,
+        val valuesToSubmit: ExampleData
+    ) : ExampleState()
+    
+    sealed class SubmitResult {
+        object Success : SubmitResult()
+        
+        data class NetworkFail(val fail: RemoteData.Fail) : SubmitResult()
+        
+        data class ValidationFail(val info: ExampleDataRejectedReason) : SubmitResult()
     }
 }
 
@@ -92,21 +118,16 @@ class ExampleSimpleModel : ViewModel() {
         )
     )
     
-    private val repository: ExampleRepository = injectExampleRepository()
+    private val simpleExampleReceiver = injectSimpleExampleReceiver()
+    private val simpleExampleSender = injectSimpleExampleSender()
     
     /**
      * See [state]
      */
-    private val _state = RStaValueDispatcher(
+    private val _state = RStaValueDispatcher<ExampleState>(
         lifecycle,
         // Initial state
-        ExampleState(
-            loaded = false,
-            synced = false,
-            lastRemoteResult = mapOf(),
-            someThing = null,
-            anotherThing = null
-        )
+        ExampleState.FirstLoad
     )
     
     /**
@@ -115,27 +136,69 @@ class ExampleSimpleModel : ViewModel() {
      */
     val state: RStaValue<ExampleState> = _state
     
-    /**
-     * Sync data with the server
-     */
-    fun sync(force: Boolean) {
-        val syncTarget = if (force) {
-            // update now
-            RemoteSyncTarget.InLast(0)
-        } else {
-            // update if it was updated more than 10 minutes ago
-            RemoteSyncTarget.InLast(600_000)
+    fun retryLoad() {
+        when (state.value) {
+            is ExampleState.LoadFailed -> {
+                load()
+            }
+            
+            ExampleState.FirstLoad, is ExampleState.Data, is ExampleState.Submitting -> {}
         }
-        
-        repository.sync(ExampleKey.SomeThing, syncTarget)
-        repository.sync(ExampleKey.AnotherThing, syncTarget)
+    }
+    
+    fun update(key: ExampleKey, value: String) {
+        val state = (_state.value as? ExampleState.Data)
+        if (state != null) {
+            _state.value = state.mutateUpdate(key, value)
+        }
+    }
+    
+    fun submit() {
+        val s = (_state.value as? ExampleState.Data)
+        if (s != null) {
+            if (!s.submitButtonEnabled) {
+                return
+            }
+            
+            // just validate is not empty for simplicity
+            val validation = mutableMapOf<ExampleKey, ValidationResult>()
+            
+            if (s.values.someThing.isBlank()) {
+                validation + (ExampleKey.SomeThing to ValidationResult.Invalid)
+            } else {
+                validation + (ExampleKey.SomeThing to ValidationResult.Valid)
+            }
+    
+            if (s.values.anotherThing.isBlank()) {
+                validation + (ExampleKey.AnotherThing to ValidationResult.Invalid)
+            } else {
+                validation + (ExampleKey.AnotherThing to ValidationResult.Valid)
+            }
+            
+            if (validation.values.any { it != ValidationResult.Valid }) {
+                _state.value = s.mutateValidation(validation)
+                return
+            }
+    
+            val submitState = s.mutateStartSubmit()
+    
+            _state.value = submitState
+    
+            dispatcher.launchNonCancellable {
+                val remoteData = simpleExampleSender(submitState.valuesToSubmit)
+                _state.value = submitState.mutateSubmitFinished(remoteData)
+            }
+        }
     }
     
     /**
-     * Write data to local cache, then send it to the server
+     * Restore values to their correspondent initial values
      */
-    fun write(key: ExampleKey, value: String) {
-        repository.write(key, ExampleValue(value))
+    fun discard() {
+        val s = (_state.value as? ExampleState.Data)
+        if (s != null) {
+            _state.value = s.mutateDiscard()
+        }
     }
     
     /**
@@ -147,55 +210,164 @@ class ExampleSimpleModel : ViewModel() {
     }
     
     init {
-        // listen repository's changes
-        repository.changeSource.listen(lifecycle) { key ->
+        load()
+    }
+    
+    private fun load() {
+        val state = ExampleState.FirstLoad
+        _state.value = state
+    
+        // start coroutine to do some asynchronous work
+        // "non cancellable" means we don't want it to be cancelled at the moment when `lifecycle` was ended
+        // instead we let the scope to finish the work
+        // (if lifecycle was already ended at this moment,
+        // manuallyCancellableScope will return `null` and `launch` call will be skipped)
+        dispatcher.launchNonCancellable {
+        
+            // Let's notice that we have to work carefully with the states here.
+            // As we started the coroutine we have to consider that _state.value can be already changed to this time
+        
+            val remoteData = simpleExampleReceiver()
+        
+            remoteData.handle(
+                { data ->
+                    _state.value = state.mutateLoadSuccess(data)
+                },
             
-            // start coroutine because the listener is not suspend function
-            // "manually cancellable" means we don't want it to be cancelled at the moment when `lifecycle` was ended
-            // instead we let the scope to finish the work
-            // (if lifecycle was already ended at this moment,
-            // manuallyCancellableScope will return `null` and `launch` call will be skipped)
-            dispatcher.manuallyCancellableScope()?.launch {
-                val (networkState, value) = repository.readWithState(key)
+                { fail ->
+                    _state.value = state.mutateLoadFailed(fail)
+                }
+            )
+        }
+    }
     
-                // Let's notice that we have to work carefully with the states here.
-                // As we started coroutine to handle the result
-                // we have to consider that _state.value can be already changed to this time,
-                // (and the state of the repository can be different too from the time when repository's event was dispatched)
-                // so we have to make a decision what values exactly we want to use to make the result state.
+    private fun ExampleState.FirstLoad.mutateLoadSuccess(data: ExampleData): ExampleState.Data {
+        return ExampleState.Data(
+            initialValues = data,
+            values = data,
+            emptyMap(),
+            null
+        )
+    }
     
-                val s = _state.value
-                
-                // We decided to use latest state (the state after the coroutine was started and the value was read)
-                // For some (not that straightforward as in the example) logic it could be a wrong decision,
-                // but if we would decide to capture the state at the first line of the listener
-                // we can face another synchronization issues like race condition.
-                // This problem can be addressed by enqueueing all the handlers, and handle exactly one event at a time,
-                // one after another.
-                // This implementation is shown in ExampleModelWithQueue (see below)
-                
-                _state.value =
-                    ExampleState(
-                        loaded(networkState),
-                        synced(networkState),
-                        networkState.data.remoteResult,
-                        s.someThing,
-                        s.anotherThing
-                    )
-                    .mutateExampleValue(key, value)
+    private fun ExampleState.FirstLoad.mutateLoadFailed(fail: RemoteData.Fail): ExampleState.LoadFailed {
+        return ExampleState.LoadFailed(fail)
+    }
+    
+    private fun ExampleState.LoadFailed.retryLoad(): ExampleState.FirstLoad {
+        return ExampleState.FirstLoad
+    }
+    
+    private fun ExampleState.Data.mutateUpdate(key: ExampleKey, value: String): ExampleState.Data {
+        return ExampleState.Data(
+            initialValues = initialValues,
+            values = values.mutate(key, value),
+            validationResult = validationResult - key,
+            submitResult = null
+        )
+    }
+    
+    private fun ExampleState.Data.mutateDiscard(): ExampleState.Data {
+        return ExampleState.Data(
+            initialValues = initialValues,
+            values = initialValues,
+            validationResult = emptyMap(),
+            submitResult = null
+        )
+    }
+    
+    private fun ExampleState.Data.mutateValidation(validation: Map<ExampleKey, ValidationResult>): ExampleState.Data {
+        return ExampleState.Data(
+            initialValues = initialValues,
+            values = values,
+            validationResult = validation,
+            submitResult = submitResult
+        )
+    }
+    
+    private fun ExampleState.Data.mutateStartSubmit(): ExampleState.Submitting {
+        return ExampleState.Submitting(
+            initialValues = initialValues,
+            valuesToSubmit = values
+        )
+    }
+    
+    private fun ExampleState.Submitting.mutateSubmitFinished(
+        remoteData: RemoteData<SendResult<ExampleData, ExampleDataRejectedReason>>
+    ): ExampleState.Data {
+        val submitResult = remoteData.handle(
+            {
+                when (it) {
+                    is SendResult.Data -> ExampleState.SubmitResult.Success
+                    is SendResult.Rejected -> ExampleState.SubmitResult.ValidationFail(it.info)
+                }
+            },
+    
+            {
+                ExampleState.SubmitResult.NetworkFail(it)
+            }
+        )
+    
+        return when (submitResult) {
+            is ExampleState.SubmitResult.NetworkFail -> {
+                ExampleState.Data(
+                    initialValues = initialValues,
+                    values = valuesToSubmit,
+                    emptyMap(),
+                    submitResult
+                )
+            }
+    
+            is ExampleState.SubmitResult.ValidationFail -> {
+                ExampleState.Data(
+                    initialValues = initialValues,
+                    values = valuesToSubmit,
+                    mapSubmitValidationToLocal(submitResult.info),
+                    submitResult
+                )
+            }
+        
+            ExampleState.SubmitResult.Success -> {
+                ExampleState.Data(
+                    initialValues = valuesToSubmit,
+                    values = valuesToSubmit,
+                    emptyMap(),
+                    submitResult
+                )
             }
         }
-        
-        // do something once when ExampleModel is instantiated
-        repository.sync(ExampleKey.SomeThing, RemoteSyncTarget.Once)
-        repository.sync(ExampleKey.AnotherThing, RemoteSyncTarget.Once)
+    }
+    
+    private fun mapSubmitValidationToLocal(validation: ExampleDataRejectedReason): Map<ExampleKey, ValidationResult> {
+        return when (validation) {
+            ExampleDataRejectedReason.InvalidSomeThing -> mapOf(ExampleKey.SomeThing to ValidationResult.Invalid)
+            ExampleDataRejectedReason.InvalidAnotherThing -> mapOf(ExampleKey.AnotherThing to ValidationResult.Invalid)
+        }
+    }
+}
+
+sealed class ExampleWithQueueState {
+    
+    data class FirstLoading(val inProgress: Boolean, val lastError: RemoteData.Fail?) : ExampleWithQueueState()
+    
+    data class Data(
+        val initialValues: ExampleData,
+        val remoteDataState: RemoteChangeableState<ExampleData>,
+        val values: ExampleData,
+        val validationResult: Map<ExampleKey, ValidationResult>,
+        val submitting: Boolean,
+    ) : ExampleWithQueueState() {
+    
+        val dataChanged: Boolean = initialValues != values
+    
+        val submitButtonEnabled: Boolean = dataChanged && !submitting
     }
 }
 
 /**
  * Example implementation where all changes are handled inside message (command) queue.
  */
-class ExampleModelWithQueue : ViewModel() {
+class ExampleWithQueueModel : ViewModel() {
     
     /**
      * [ExampleReducerCommand] is all messages (commands) that can be enqueued.
@@ -204,9 +376,11 @@ class ExampleModelWithQueue : ViewModel() {
      */
     sealed class ExampleCommand : ExampleReducerCommand {
     
-        data class Sync(val force: Boolean) : ExampleCommand()
+        object RetryLoad : ExampleCommand()
         
-        data class Write(val key: ExampleKey, val value: String) : ExampleCommand()
+        data class Update(val key: ExampleKey, val value: String) : ExampleCommand()
+        
+        object Submit : ExampleCommand()
     }
     
     private val lifecycle = RStaLifecycleDispatcher(injectDomainCoordinator())
@@ -218,24 +392,23 @@ class ExampleModelWithQueue : ViewModel() {
         )
     )
     
+    private val elapsedRealTimeSource: ElapsedRealTimeSource = injectElapsedRealTimeSource()
+    
     private val repository: ExampleRepository = injectExampleRepository()
     
-    private val _state = RStaValueDispatcher(
+    private val _state = RStaValueDispatcher<ExampleWithQueueState>(
         lifecycle,
-        ExampleState(
-            loaded = false,
-            synced = false,
-            lastRemoteResult = mapOf(),
-            someThing = null,
-            anotherThing = null
+        ExampleWithQueueState.FirstLoading(
+            inProgress = true,
+            lastError = null
         )
     )
     
-    val state: RStaValue<ExampleState> = _state
+    val state: RStaValue<ExampleWithQueueState> = _state
     
     /**
      * Now we want to use a queue.
-     * Each interaction with ExampleModelWithQueue is described by interaction-specific message
+     * Each interaction with ExampleWithQueueModel is described by interaction-specific message
      * (implemented as [ExampleReducerCommand] here).
      *
      * The messages are enqueued and executed in sequence
@@ -273,13 +446,14 @@ class ExampleModelWithQueue : ViewModel() {
          * These classes represent private (inner) commands.
          */
         data class HandleRepositoryChange(
-            val key: ExampleKey,
-            val networkState: RemoteQueueHandler.State<ExampleNetworkingData, ExampleKey, ExampleValue>
+            val networkState: RemoteQueueHandler.State<ExampleNetworkingData, Unit, ExampleData>
         ) : ExampleReducerCommand
         
         // Other private commands can be here
         // data class OtherPrivateCommand() : ExampleReducerCommand
     }
+    
+    private val syncTarget = RemoteSyncTarget.InLast(600_000)
     
     init {
         // Main view model logic is here.
@@ -291,59 +465,152 @@ class ExampleModelWithQueue : ViewModel() {
             dispatcher
         ) { command ->
             // handle the command
-            when (command) {
-                is ExampleCommand.Sync -> {
-                    val syncTarget = if (command.force) {
-                        // update now
-                        RemoteSyncTarget.InLast(0)
-                    } else {
-                        // update if it was updated more than 10 minutes ago
-                        RemoteSyncTarget.InLast(600_000)
-                    }
-    
-                    repository.sync(ExampleKey.SomeThing, syncTarget)
-                    repository.sync(ExampleKey.AnotherThing, syncTarget)
-                }
+            when (val state = _state.value) {
+                is ExampleWithQueueState.FirstLoading -> {
+                    when (command) {
+                        is ExampleCommand.RetryLoad -> {
+                            when (_state.value) {
+                                is ExampleWithQueueState.FirstLoading -> {
+                                    // update if the last update was more than 10 minutes ago
+                                    repository.sync(Unit, syncTarget)
+                                }
                 
-                is ExampleCommand.Write -> {
-                    repository.write(command.key, ExampleValue(command.value))
-                }
-                
-                is ExampleReducerCommand.HandleRepositoryChange -> {
-                    // we can use suspend functions here
-                    val nextValue = repository.read(command.key)
-                    if (nextValue == null) {
-                        // Here is an example of handling when we want to do something that requires a lot of time.
-                        // We don't want to delay execution of subsequent commands so we start a separate coroutine.
-                        // As we use the same dispatcher we used as a parameter for RStaBaseMessageQueueHandlerImpl
-                        // and we know that the CoroutineContext for the dispatcher
-                        // is configured to use a fixed thread for all coroutines,
-                        // we know it will not create concurrency problems, because this lambda
-                        // will be enqueued to be executed on the same thread.
-                        dispatcher.manuallyCancellableScope()?.launch {
-                            delay(10000)
-                            
-                            // However in this scope (inside the launch lambda) we shouldn't update the state
-                            // or else we will introduce unnecessary concurrent complexity.
-                            // We just make a call to the repository
-                            // and because we listen all the changes of it
-                            // we will handle the result of the call there
-                            
-                            // Here we enqueue sync command to the repository.
-                            // If the repository will already have sync command for the same key,
-                            // it will not lead to excessive networking because we have specified RemoteSyncTarget.Once parameter
-                            repository.sync(command.key, RemoteSyncTarget.Once)
+                                is ExampleWithQueueState.Data -> {}
+                            }
                         }
-                    } else {
-                        _state.value =
-                            ExampleState(
-                                loaded(command.networkState),
-                                synced(command.networkState),
-                                command.networkState.data.remoteResult,
-                                _state.value.someThing,
-                                _state.value.anotherThing,
+        
+                        is ExampleReducerCommand.HandleRepositoryChange -> {
+                            // we can use suspend functions here
+                            val localRemoteState = repository.readLocalRemoteWithState(Unit)
+                            val remoteState = RemoteChangeableState.fromLocalRemoteWithState(
+                                localRemoteState,
+                                Unit,
+                                RemoteSyncTarget.Once,
+                                elapsedRealTimeSource(),
+                                {
+                                    (localRemoteState.first.data.remoteResult as? RemoteData.Fail)
+                                },
+                                {
+                                    false
+                                }
                             )
-                            .mutateExampleValue(command.key, nextValue)
+                            
+                            when (remoteState.remote) {
+                                is RemoteState.NotSynced -> {
+                                    if (!remoteState.remote.inProgress) {
+                                        // Here is an example of handling when we want to do something that requires a lot of time.
+                                        // We don't want to delay execution of subsequent commands so we start a separate coroutine.
+                                        // As we use the same dispatcher we used as a parameter for RStaBaseMessageQueueHandlerImpl
+                                        // and we know that the CoroutineContext for the dispatcher
+                                        // is configured to use a fixed thread for all coroutines,
+                                        // we know it will not create concurrency problems, because this lambda
+                                        // will be enqueued to be executed on the same thread.
+                                        dispatcher.launchNonCancellable {
+                                            delay(10000)
+        
+                                            // However in this scope (inside the launch lambda) we shouldn't update the state
+                                            // or else we will introduce unnecessary concurrent complexity.
+                                            // We just make a call to the repository
+                                            // and because we listen all the changes of it
+                                            // we will handle the result of the call there
+        
+                                            // Here we enqueue sync command to the repository.
+                                            // If the repository will already have sync command for the same key,
+                                            // it will not lead to excessive networking because we have specified RemoteSyncTarget.Once parameter
+                                            repository.sync(Unit, syncTarget)
+                                        }
+                                    }
+                                }
+                                
+                                is RemoteState.Synced -> {
+                                    when (remoteState) {
+                                        is RemoteChangeableState.Data -> {
+                                            _state.value = state.mutateOnRepositoryData(remoteState)
+                                        }
+                                        
+                                        is RemoteChangeableState.NoData -> {
+                                            // do nothing
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // if (nextValue == null) {
+                            //
+                            // } else {
+                            //     _state.value =
+                            //         ExampleState(
+                            //             loaded(command.networkState),
+                            //             synced(command.networkState),
+                            //             command.networkState.data.remoteResult,
+                            //             _state.value.someThing,
+                            //             _state.value.anotherThing,
+                            //         )
+                            //             .mutateExampleValue(command.key, nextValue)
+                            // }
+                        }
+    
+                        is ExampleCommand.Update -> {}
+                        is ExampleCommand.Submit -> {}
+                    }
+                }
+        
+                is ExampleWithQueueState.Data -> {
+                    when (command) {
+                        is ExampleCommand.RetryLoad -> {}
+        
+                        is ExampleCommand.Update -> {
+                            _state.value = state.mutateUpdate(command.key, command.value)
+                        }
+        
+                        is ExampleReducerCommand.HandleRepositoryChange -> {
+                            val localRemoteState = repository.readLocalRemoteWithState(Unit)
+                            val remoteState = RemoteChangeableState.fromLocalRemoteWithState(
+                                localRemoteState,
+                                Unit,
+                                RemoteSyncTarget.Once,
+                                elapsedRealTimeSource(),
+                                {
+                                    (localRemoteState.first.data.remoteResult as? RemoteData.Fail)
+                                },
+                                {
+                                    false
+                                }
+                            )
+                            
+                            when (remoteState) {
+                                is RemoteChangeableState.Data -> {
+                                    _state.value = state.mutateOnRepositoryChanged(remoteState)
+                                }
+                                
+                                is RemoteChangeableState.NoData -> {}
+                            }
+                        }
+                        
+                        ExampleCommand.Submit -> {
+                            if (state.dataChanged) {
+                                // just validate is not empty for simplicity
+                                val validation = mutableMapOf<ExampleKey, ValidationResult>()
+    
+                                if (state.values.someThing.isBlank()) {
+                                    validation + (ExampleKey.SomeThing to ValidationResult.Invalid)
+                                } else {
+                                    validation + (ExampleKey.SomeThing to ValidationResult.Valid)
+                                }
+    
+                                if (state.values.anotherThing.isBlank()) {
+                                    validation + (ExampleKey.AnotherThing to ValidationResult.Invalid)
+                                } else {
+                                    validation + (ExampleKey.AnotherThing to ValidationResult.Valid)
+                                }
+    
+                                _state.value = state.mutateValidation(validation)
+                                
+                                if (validation.values.all { it == ValidationResult.Valid }) {
+                                    repository.write(Unit, state.values)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -352,55 +619,83 @@ class ExampleModelWithQueue : ViewModel() {
         // listen repository's changes
         repository.changeSource.listen(lifecycle) { key ->
             // we handle the changes here by adding appropriate commands to the queue
-            reducer.add(ExampleReducerCommand.HandleRepositoryChange(key, repository.state.value))
+            reducer.add(ExampleReducerCommand.HandleRepositoryChange(repository.state.value))
         }
     
-        // do something once when ExampleModel is instantiated
-        repository.sync(ExampleKey.SomeThing, RemoteSyncTarget.Once)
-        repository.sync(ExampleKey.AnotherThing, RemoteSyncTarget.Once)
-    }
-}
-
-// This method should belong both to ExampleModel and ExampleModelWithQueue
-// (it is moved out and shared between the models for simplicity of the example)
-private fun loaded(networkState: RemoteQueueHandler.State<ExampleNetworkingData, ExampleKey, ExampleValue>): Boolean {
-    val failedMap = networkState.failedAttempts
-    if (failedMap[ExampleKey.SomeThing] != null || failedMap[ExampleKey.AnotherThing] != null) {
-        return false
+        // do something once when ExampleWithQueueModel is instantiated
+        reducer.add(ExampleCommand.RetryLoad)
     }
     
-    val successMap = networkState.lastSuccessfulElapsedRealTimes
-    return successMap[ExampleKey.SomeThing] != null && successMap[ExampleKey.AnotherThing] != null
-}
-
-// This method should belong both to ExampleModel and ExampleModelWithQueue
-// (it is moved out and shared between the models for simplicity of the example)
-private fun synced(networkState: RemoteQueueHandler.State<ExampleNetworkingData, ExampleKey, ExampleValue>): Boolean {
-    if (!loaded(networkState)) {
-        return false
+    private fun ExampleWithQueueState.FirstLoading.mutateOnRepositoryData(
+        remoteData: RemoteChangeableState.Data<ExampleData>
+    ): ExampleWithQueueState.Data {
+        return ExampleWithQueueState.Data(
+            initialValues = remoteData.local,
+            remoteDataState = remoteData,
+            values = remoteData.local,
+            validationResult = emptyMap(),
+            submitting = submitting(remoteData)
+        )
     }
     
-    val inQueue = networkState.queue.any {
-        it.value.key == ExampleKey.SomeThing || it.value.key == ExampleKey.AnotherThing
+    private fun ExampleWithQueueState.FirstLoading.mutateOnRepositoryNoData(
+        remoteData: RemoteChangeableState.NoData<ExampleData>
+    ): ExampleWithQueueState.FirstLoading {
+        return ExampleWithQueueState.FirstLoading(
+            remoteData.state.inProgress,
+            remoteData.state.lastError
+        )
     }
     
-    if (inQueue) {
-        return false
+    private fun ExampleWithQueueState.Data.mutateOnRepositoryChanged(
+        remoteData: RemoteChangeableState.Data<ExampleData>
+    ): ExampleWithQueueState.Data {
+        if (submitting && !submitting(remoteData)) {
+            return ExampleWithQueueState.Data(
+                initialValues = if (remoteData.aheadInfo == null) remoteData.local else initialValues,
+                remoteDataState = remoteData,
+                values = remoteData.local,
+                validationResult = validationResult,
+                submitting = false
+            )
+        }
+        
+        return ExampleWithQueueState.Data(
+            initialValues = initialValues,
+            remoteDataState = remoteData,
+            values = remoteData.local,
+            validationResult = validationResult,
+            submitting = submitting(remoteData)
+        )
     }
     
-    val inFailedSends = networkState.failedSends.any {
-        it.key == ExampleKey.SomeThing || it.key == ExampleKey.AnotherThing
+    private fun ExampleWithQueueState.Data.mutateUpdate(key: ExampleKey, value: String): ExampleWithQueueState.Data {
+        return ExampleWithQueueState.Data(
+            initialValues = initialValues,
+            remoteDataState = remoteDataState,
+            values = values.mutate(key, value),
+            validationResult = validationResult - key,
+            submitting = submitting
+        )
     }
     
-    if (inFailedSends) {
-        return false
+    private fun ExampleWithQueueState.Data.mutateValidation(validation: Map<ExampleKey, ValidationResult>): ExampleWithQueueState.Data {
+        return ExampleWithQueueState.Data(
+            initialValues = initialValues,
+            remoteDataState = remoteDataState,
+            values = values,
+            validationResult = validation,
+            submitting = submitting
+        )
     }
     
-    return true
+    private fun submitting(remoteData: RemoteChangeableState<ExampleData>): Boolean {
+        return remoteData.aheadInfo?.inProgress == true
+    }
 }
 
 // Should be in domain layer
-interface ExampleRepository : WritableSimpleRemoteDataSource<ExampleNetworkingData, ExampleKey, ExampleValue>
+interface ExampleRepository : WritableSimpleRemoteDataSource<ExampleNetworkingData, Unit, ExampleData>
 
 // Should be in data layer (factory function for ExampleRepository)
 fun ExampleRepository(
@@ -415,21 +710,21 @@ fun ExampleRepository(
     elapsedRealTimeSource: ElapsedRealTimeSource,
     
     // access to local cache
-    exampleLocalRepository: Repository.Writable<ExampleKey, ExampleValue>,
+    exampleLocalRepository: Repository.Writable<Unit, ExampleData>,
     
     // local cache for "locally ahead" values (see WritableSimpleRemoteDataSource for details)
-    exampleLocalCommandsRepository: Repository.Writable<Unit, List<Pair<ExampleKey, ExampleValue>>>,
+    exampleLocalCommandsRepository: Repository.Writable<Unit, List<Pair<Unit, ExampleData>>>,
     
     // provides access to send and receive data to/from the server
-    exampleRemoteRepository: DirectRemoteRepository.SenderReceiver<ExampleKey, ExampleValue, SendResult<ExampleValue, ExampleDataRejectedReason>>
+    exampleRemoteRepository: DirectRemoteRepository.SenderReceiver<Unit, ExampleData, SendResult<ExampleData, ExampleDataRejectedReason>>
 ): ExampleRepository {
     // See WritableSimpleRemoteDataSource
-    val exampleRepository = WritableSimpleRemoteDataSource(
+    val exampleRepository = WritableSimpleRemoteDataSource<ExampleNetworkingData, Unit, ExampleData>(
         dataLayerCoroutineLifecycle,
         elapsedRealTimeSource,
         exampleLocalRepository,
         exampleLocalCommandsRepository,
-        ExampleNetworkingData(mapOf()),
+        ExampleNetworkingData(null),
         { state, command ->
             // Not very interesting
             state
@@ -441,7 +736,7 @@ fun ExampleRepository(
         val (handlerResult, remoteData) = when (command) {
             is RemoteQueueHandler.SyncCommand.Sync -> {
                 // if we need to Sync, get the value from the server
-                exampleRemoteRepository.get(command.key)
+                exampleRemoteRepository.get(Unit)
                     .handle(
                         {
                             // successful networking branch
@@ -457,7 +752,7 @@ fun ExampleRepository(
             
             is RemoteQueueHandler.SyncCommand.Send -> {
                 // send the value to the server
-                exampleRemoteRepository.send(command.key, command.command)
+                exampleRemoteRepository.send(Unit, command.command)
                     .handle(
                         { sendResult ->
                             // successful networking branch
@@ -484,28 +779,20 @@ fun ExampleRepository(
         // and next state (in our example it is the information about the last networking)
         handlerResult to
             state.copy(
-                remoteResult = state.remoteResult + (key to remoteData)
+                remoteResult = remoteData
             )
     }
     
     return object :
         ExampleRepository,
-        WritableSimpleRemoteDataSource<ExampleNetworkingData, ExampleKey, ExampleValue> by exampleRepository {}
+        WritableSimpleRemoteDataSource<ExampleNetworkingData, Unit, ExampleData> by exampleRepository {}
 }
 
 // Example of repository state (or more specifically it is a part of repository's state called `data`)
 // In the example it holds the information about the last networking to provide feedback to user when something goes wrong
 data class ExampleNetworkingData(
-    val remoteResult: Map<ExampleKey, RemoteData<SendResult<Unit, ExampleDataRejectedReason>>>
+    val remoteResult: RemoteData<SendResult<Unit, ExampleDataRejectedReason>>?
 )
-
-enum class ExampleKey {
-    SomeThing,
-    AnotherThing
-}
-
-// Implemented as data class instead of just String to show the repository can work with any types of data, not just strings
-data class ExampleValue(val exampleData: String)
 
 // Example for the case when server can reject the data for some reason
 // (for example if you can't validate the data completely before the send)
@@ -531,8 +818,12 @@ sealed class SendResult<out DataType, out RejectedType> {
     }
 }
 
+enum class ValidationResult {
+    NotValidated, Empty, Invalid, Valid
+}
+
 // Example of specific Rejected type for SendResult.
-enum class ExampleDataRejectedReason { InvalidData }
+enum class ExampleDataRejectedReason { InvalidSomeThing, InvalidAnotherThing }
 
 // Interface for the source of current elapsed real time.
 // Made as interface for convenient injection.
@@ -546,6 +837,24 @@ fun injectDomainCoordinator(): RStaEventsQueueDispatcher {
 fun injectDomainCoroutineContext(): CoroutineContext {
     // Let's imagine that we have provided CoroutineContext here
     TODO()
+}
+
+fun injectSimpleExampleReceiver(): suspend () -> RemoteData<ExampleData> {
+    // Let's imagine that we have provided an ExampleRepository
+    TODO()
+}
+
+fun injectSimpleExampleSender(): suspend (ExampleData) -> RemoteData<SendResult<ExampleData, ExampleDataRejectedReason>> {
+    // Let's imagine that we have provided an ExampleRepository
+    TODO()
+}
+
+fun injectElapsedRealTimeSource(): ElapsedRealTimeSource {
+    return object : ElapsedRealTimeSource {
+        override fun invoke(): Long {
+            return SystemClock.elapsedRealtime()
+        }
+    }
 }
 
 fun injectExampleRepository(): ExampleRepository {

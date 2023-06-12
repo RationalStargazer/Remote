@@ -298,7 +298,7 @@ class WritableRemoteComplexDataSourceImpl<StateData, Key, Value : Any, Command>(
      * Resume commands queue (see [pause])
      */
     fun start() {
-        intentStart = true
+        startTarget = true
         
         if (_loaded.value) {
             commandsQueue.start()
@@ -313,11 +313,11 @@ class WritableRemoteComplexDataSourceImpl<StateData, Key, Value : Any, Command>(
      * until the queue will be resumed with [start].
      */
     fun pause() {
-        intentStart = false
+        startTarget = false
         commandsQueue.pause()
     }
 
-    private var intentStart: Boolean = true
+    private var startTarget: Boolean = true
     private var writeCalled: Boolean = false
 
     private val commandsQueue = RStaBaseMessageQueueHandlerImpl<Unit>(coroutineDispatcher, this::handleCommands)
@@ -326,7 +326,7 @@ class WritableRemoteComplexDataSourceImpl<StateData, Key, Value : Any, Command>(
         }
     
     private suspend fun handleCommands(@Suppress("UNUSED_PARAMETER") any: Unit) {
-        while (intentStart && waitingCommands.value.isNotEmpty() || innerState.value.queue.isNotEmpty()) {
+        while (startTarget && waitingCommands.value.isNotEmpty() || innerState.value.queue.isNotEmpty()) {
             val reducedState = if (waitingCommands.value.isEmpty()) {
                 innerState.value
             } else {
@@ -387,7 +387,7 @@ class WritableRemoteComplexDataSourceImpl<StateData, Key, Value : Any, Command>(
                 _loaded.value = true
                 loadJob.complete()
                 
-                if (intentStart) {
+                if (startTarget) {
                     commandsQueue.start()
                     commandsQueue.add(Unit)
                 }

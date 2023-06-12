@@ -86,6 +86,11 @@ interface BaseRemoteComplexDataSource<Key, Value : Any> {
     fun sync(key: Key, target: RemoteSyncTarget): RemoteSyncId
     
     /**
+     * The same as [sync], but also suspends until the sync will be handled (successfully or not)
+     */
+    suspend fun waitForSync(key: Key, target: RemoteSyncTarget)
+    
+    /**
      * Reads data from local cache. The same as readLocalRemote()?.local
      */
     suspend fun read(key: Key): Value?
