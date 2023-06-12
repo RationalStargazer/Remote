@@ -26,8 +26,6 @@ repository.state.listen(lifecycle) { networkingState ->
 }
 ```
 
-Example: [ExampleViewModel.kt](app/src/main/java/net/rationalstargazer/networking/ExampleModel.kt)
-
 Implementation for simple data: [WritableSimpleRemoteDataSource.kt](remote/src/main/java/example/WritableSimpleRemoteDataSource.kt)
 
 Basic customizable implementation: [WritableRemoteComplexDataSourceImpl.kt](remote/src/main/java/net/rationalstargazer/remote/sync/WritableRemoteComplexDataSourceImpl.kt)

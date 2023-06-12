@@ -70,7 +70,7 @@ class RStaBaseMessageQueueHandlerImpl<Message> constructor(
         }
 
         enqueued = true
-        coroutineDispatcher.manuallyCancellableScope()!!.launch {
+        coroutineDispatcher.launchNonCancellable {
             while(active && messages.isNotEmpty()) {
                 val message = messages.first()
                 messages = messages.drop(1)

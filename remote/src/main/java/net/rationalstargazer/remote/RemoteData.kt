@@ -1,51 +1,21 @@
 package net.rationalstargazer.remote
 
+import net.rationalstargazer.types.Either
+
 sealed class RemoteData<out T> {
     
     companion object {
-        
-        fun <T> data(value: T): RemoteData.Data<T> =
-            Data(value)
-        
-        fun connectionError(details: String? = null, causedBy: Throwable? = null): Fail =
-            Fail(FailSubtype.CONNECTION_ERROR, details, causedBy)
-        
-        fun invalidResult(details: String? = null, causedBy: Throwable? = null): Fail =
-            Fail(FailSubtype.INVALID_RESULT, details, causedBy)
-        
-        fun notAuthorized(details: String? = null, causedBy: Throwable? = null): Fail =
-            Fail(FailSubtype.NOT_AUTHORIZED, details, causedBy)
-        
-        inline fun <T, R> RemoteData<T>.whenData(dataBranch: (Data<T>) -> RemoteData<R>): RemoteData<R> =
-            when (this) {
-                is Data -> dataBranch(this)
-                is Fail -> this
-            }
-        
-        inline fun <T> RemoteData<T>.whenFail(failBranch: (Fail) -> RemoteData<T>): RemoteData<T> =
-            when (this) {
-                is Data -> this
-                is Fail -> failBranch(this)
-            }
-        
-        inline fun <T> RemoteData<T>.doWhenData(dataBranch: (Data<T>) -> Unit) {
-            whenData {
-                dataBranch(it)
-                it
-            }
-        }
-        
-        inline fun <T, R> RemoteData<T>.handle(
-            dataBranch: (T) -> R,
-            failBranch: (Fail) -> R
-        ): R =
-            when (this) {
-                is Data -> dataBranch(this.data)
-                is Fail -> failBranch(this)
-            }
+        fun connectionError(details: String? = null, causedBy: Throwable? = null): RemoteData.Fail =
+            RemoteData.Fail(RemoteData.FailSubtype.CONNECTION_ERROR, details, causedBy)
+    
+        fun invalidResult(details: String? = null, causedBy: Throwable? = null): RemoteData.Fail =
+            RemoteData.Fail(RemoteData.FailSubtype.INVALID_RESULT, details, causedBy)
+    
+        fun notAuthorized(details: String? = null, causedBy: Throwable? = null): RemoteData.Fail =
+            RemoteData.Fail(RemoteData.FailSubtype.NOT_AUTHORIZED, details, causedBy)
     }
     
-    data class Data<T>(val data: T) : RemoteData<T>()
+    data class Data<out T>(val data: T) : RemoteData<T>()
     
     data class Fail(
         val subtype: FailSubtype,
@@ -78,3 +48,24 @@ sealed class RemoteData<out T> {
             is Fail -> this
         }
 }
+
+fun <T, R> RemoteData<T>.mapData(dataBranch: (RemoteData.Data<T>) -> RemoteData<R>): RemoteData<R> =
+    when (this) {
+        is RemoteData.Data -> dataBranch(this)
+        is RemoteData.Fail -> this
+    }
+
+fun <R> RemoteData<R>.mapFail(failBranch: (RemoteData.Fail) -> RemoteData<R>): RemoteData<R> =
+    when (this) {
+        is RemoteData.Data -> this
+        is RemoteData.Fail -> failBranch(this)
+    }
+
+fun <T, R> RemoteData<T>.handle(
+    dataBranch: (T) -> R,
+    failBranch: (RemoteData.Fail) -> R
+): R =
+    when (this) {
+        is RemoteData.Data -> dataBranch(this.data)
+        is RemoteData.Fail -> failBranch(this)
+    }

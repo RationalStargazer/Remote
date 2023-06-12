@@ -281,7 +281,11 @@ class WritableRemoteComplexDataSourceImpl<StateData, Key, Value : Any, Command>(
         commandsQueue.add(Unit)
         return syncCommand.id
     }
-
+    
+    override suspend fun waitForSync(key: Key, target: RemoteSyncTarget) {
+        TODO("Not yet implemented")
+    }
+    
     fun change(
         reducer: (state: RemoteQueueHandler.State<StateData, Key, Command>) -> RemoteQueueHandler.State<StateData, Key, Command>
     ) {
@@ -367,7 +371,7 @@ class WritableRemoteComplexDataSourceImpl<StateData, Key, Value : Any, Command>(
         val commandsSource = asyncCommandsOneTimeSource
         
         if (stateSource != null || commandsSource != null) {
-            coroutineDispatcher.manuallyCancellableScope()?.launch {
+            coroutineDispatcher.launchNonCancellable {
                 if (stateSource != null) {
                     val state = stateSource()
                     innerState.value = state

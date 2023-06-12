@@ -1,173 +1,192 @@
 package example
 
-import net.rationalstargazer.remote.RemoteData
 import net.rationalstargazer.remote.sync.BaseRemoteComplexDataSource
 import net.rationalstargazer.remote.sync.RemoteQueueHandler
-import net.rationalstargazer.remote.sync.RemoteSyncIdValue
-import net.rationalstargazer.remote.sync.RemoteSyncTarget
+import net.rationalstargazer.types.handle
 
-sealed class RemoteChangeableState<out T: Any> {
+/*
+sealed class RemoteChangeableState<out T: Any, out AheadAdditionalData, out ReceiveError : Any, out SendError : Any> {
     
     abstract val local: T?
-    abstract val remote: RemoteState<T>
-    abstract val aheadInfo: Data.AheadInfo?
-    abstract val state: Data.State<T>
+    abstract val localAheadState: AheadState<T, AheadAdditionalData, SendError>?
+    abstract val remoteState: RemoteState<T?, ReceiveError>
+    abstract val inProgress: Boolean
+    abstract val allSynced: Boolean
     
-    data class NoData<out T : Any>(
-        override val remote: RemoteState.NotSynced<T>,
-    ) : RemoteChangeableState<T>() {
+    data class NoData<out T : Any, out AheadAdditionalData, out ReceiveError : Any>(
+        override val remoteState: RemoteState.NotSynced<Nothing?, ReceiveError>,
+    ) : RemoteChangeableState<T, AheadAdditionalData, ReceiveError, Nothing>() {
         
         override val local: Nothing? = null
-        override val aheadInfo: Nothing? = null
         
-        override val state: Data.State.NotSynced<T> = Data.State.NotSynced(
-            local = null,
-            remote = null,
-            inProgress = remote.inProgress,
-            isAhead = null,
-            lastError = remote.lastError
-        )
+        override val localAheadState: Nothing? = null
+    
+        override val inProgress: Boolean = remoteState.inProgress
+        
+        override val allSynced: Boolean = false
     }
     
-    data class Data<out T : Any>(
-        override val local: T,
-        override val remote: RemoteState<T>,
-        override val aheadInfo: AheadInfo?,
-    ) : RemoteChangeableState<T>() {
+    sealed class Data<out T: Any, AheadAdditionalData, out ReceiveError : Any, out SendError : Any> :
+        RemoteChangeableState<T, AheadAdditionalData, ReceiveError, SendError>() {
+    
+        abstract override val local: T
+        abstract override val remoteState: RemoteState<T?, ReceiveError>
         
-        override val state: State<T>
+        data class Ahead<out T: Any, AdditionalAheadData, out ReceiveError : Any, out SendError : Any>(
+            override val remoteState: RemoteState<T?, ReceiveError>,
+            override val localAheadState: AheadState<T, AdditionalAheadData, SendError>,
+        ) : Data<T, AdditionalAheadData, ReceiveError, SendError>() {
         
-        init {
-            state = when (remote) {
-                is RemoteState.Synced -> {
-                    if (aheadInfo != null) {
-                        State.Ahead(
-                            local,
-                            aheadInfo.inProgress || remote.inProgress,
-                            aheadInfo.lastError,
-                            aheadInfo.problematic
-                        )
-                    } else {
-                        State.Synced(remote.value, remote.inProgress)
-                    }
-                }
-                
-                is RemoteState.NotSynced -> {
-                    State.NotSynced(
-                        local,
-                        remote.value,
-                        aheadInfo?.inProgress == true || remote.inProgress,
-                        aheadInfo != null,
-                        aheadInfo?.lastError ?: remote.lastError
-                    )
-                }
-            }
+            override val local: T = localAheadState.value
+        
+            override val inProgress: Boolean = localAheadState.inProgress || remoteState.inProgress
+            
+            override val allSynced: Boolean = false
         }
+    
+        data class NotAhead<out T: Any, AdditionalAheadData, out ReceiveError : Any, out SendError : Any>(
+            override val remoteState: RemoteState<T, ReceiveError>,
+        ) : Data<T, AdditionalAheadData, ReceiveError, SendError>() {
         
-        data class AheadInfo(
-            val inProgress: Boolean,
-            val lastError: RemoteData.Fail?,
-            val problematic: Boolean
-        )
+            override val local: T = remoteState.value
+    
+            override val localAheadState: Nothing? = null
+            
+            override val inProgress: Boolean = remoteState.inProgress
         
-        sealed class State<out T : Any> {
-            
-            abstract val value: T?
-            abstract val inProgress: Boolean
-            abstract val isAhead: Boolean?
-            abstract val lastError: RemoteData.Fail?
-            
-            data class NotSynced<out T : Any>(
-                val local: T?,
-                val remote: T?,
-                override val inProgress: Boolean,
-                override val isAhead: Boolean?,
-                override val lastError: RemoteData.Fail?
-            ) : State<T>() {
-                
-                override val value: T? = local
-            }
-            
-            data class Synced<out T : Any>(
-                override val value: T,
-                override val inProgress: Boolean,
-            ) : State<T>() {
-                
-                override val isAhead: Boolean = false
-                override val lastError: RemoteData.Fail? = null
-            }
-            
-            data class Ahead<out T : Any>(
-                override val value: T,
-                override val inProgress: Boolean,
-                override val lastError: RemoteData.Fail?,
-                val problematic: Boolean
-            ) : State<T>() {
-                
-                override val isAhead: Boolean = true
-            }
+            override val allSynced: Boolean = remoteState.isSynced
         }
     }
+    
+    sealed interface ByRemoteState<out T: Any, out AheadAdditionalData, out ReceiveError : Any, out SendError : Any> {
+    
+        val remoteState: RemoteState<T?, ReceiveError>
+        val asState: RemoteChangeableState<T, AheadAdditionalData, ReceiveError, SendError>
+        
+        data class Behind<out T: Any, out AheadAdditionalData, out ReceiveError : Any, out SendError : Any>(
+            override val remoteState: RemoteState.NotSynced<T?, ReceiveError>,
+            val localAheadState: AheadState<T, AheadAdditionalData, SendError>?
+        ) : ByRemoteState<T, AheadAdditionalData, ReceiveError, SendError> {
+    
+            override val asState: RemoteChangeableState<T, AheadAdditionalData, ReceiveError, SendError> =
+                RemoteChangeableState(remoteState, localAheadState)
+        }
+    
+        data class NotBehind<out T: Any, out AheadAdditionalData, out ReceiveError : Any, out SendError : Any>(
+            override val remoteState: RemoteState.Synced<T>,
+            val localAheadState: AheadState<T, AheadAdditionalData, SendError>?
+        ) : ByRemoteState<T, AheadAdditionalData, ReceiveError, SendError> {
+        
+            override val asState: RemoteChangeableState<T, AheadAdditionalData, ReceiveError, SendError> =
+                RemoteChangeableState(remoteState, localAheadState)
+        }
+    }
+    
+    data class AheadState<out T : Any, out AdditionalData, out Error : Any>(
+        val value: T,
+        val inProgress: Boolean,
+        val additional: AdditionalData,
+        val lastError: Error?,
+    )
     
     companion object {
         fun <StateData, Key, Value : Any, Command> fromLocalRemoteWithState(
-            source: Pair<RemoteQueueHandler.State<StateData, Key, Command>, BaseRemoteComplexDataSource.LocalRemote<Value>?>,
+            repositoryState: RemoteQueueHandler.State<StateData, Key, Command>,
+            localRemote: BaseRemoteComplexDataSource.LocalRemote<Value>?,
             key: Key,
-            syncCriteria: RemoteSyncTarget,
-            elapsedRealTimeNow: Long,
-            lastRemoteDataProvider: (Key) -> RemoteData.Fail?,
-            problematicMapper: (Key) -> Boolean,
-        ): RemoteChangeableState<Value> {
-            val (state, localRemote) = source
-    
-            val keyInQueue = state.queue.any { it.value.key == key }
+        ): RemoteChangeableState<Value, Unit, Unit, Unit> {
+            val keyInQueue = repositoryState.queue.any { it.value.key == key }
             
             if (localRemote == null) {
                 return NoData(
                     RemoteState.NotSynced(
-                        value = null,
+                        null,
                         keyInQueue,
-                        lastRemoteDataProvider(key)
+                        Unit
                     )
                 )
             }
             
-            val hasSendsInQueue = state.queue.any {
+            val hasSendsInQueue = repositoryState.queue.any {
                 when (it.value) {
                     is RemoteQueueHandler.SyncCommand.Sync -> false
                     is RemoteQueueHandler.SyncCommand.Send -> true
                 }
             }
             
-            val hasFailedSends = state.failedSends.any { it.key == key }
+            val hasFailedSends = repositoryState.failedSends.any { it.key == key }
             
-            val fresh = syncCriteria.isFresh(
-                true,
-                state.lastSuccessfulElapsedRealTimes[key]?.let { RemoteQueueHandler.State.TimeData.Precise(it) },
-                elapsedRealTimeNow
-            )
-            
-            if (hasSendsInQueue || hasFailedSends) {
-                return Data(
-                    local = localRemote.local,
-                    remote = if (fresh) {
-                        RemoteState.Synced(localRemote.remote, keyInQueue)
-                    } else {
-                        RemoteState.NotSynced(localRemote.remote, keyInQueue, lastRemoteDataProvider(key))
-                    },
-                    aheadInfo = Data.AheadInfo(hasSendsInQueue, lastRemoteDataProvider(key), problematicMapper(key))
-                )
+            val lastFailed = repositoryState.failedAttempts[key] != null
+            val remoteState = if (lastFailed) {
+                RemoteState.NotSynced(localRemote.remote, keyInQueue, Unit)
+            } else {
+                RemoteState.Synced(localRemote.remote, keyInQueue)
             }
-    
-            return Data(
-                local = localRemote.local,
-                remote = if (fresh) {
-                    RemoteState.Synced(localRemote.remote, keyInQueue)
-                } else {
-                    RemoteState.NotSynced(localRemote.remote, keyInQueue, lastRemoteDataProvider(key))
-                },
-                aheadInfo = null
-            )
+            
+            return if (hasSendsInQueue || hasFailedSends) {
+                Data.Ahead(remoteState, AheadState(localRemote.local, hasSendsInQueue, Unit, Unit))
+            } else {
+                Data.NotAhead(remoteState)
+            }
         }
     }
+    
+    // fun <R : Any> mapData(mapper: (T) -> R): RemoteChangeableState<R, AheadAdditionalData, ReceiveError, SendError> {
+    //     toEitherByData()
+    //         .mapLeft { data ->
+    //             when (data) {
+    //                 is Data.Ahead -> Data.Ahead(remoteState.mapValue(mapper), localAheadState)
+    //                 is Data.NotAhead -> TODO()
+    //             }
+    //         }
+    // }
+    
+    // fun <R : Any> mapData(mapper: (T) -> R): RemoteChangeableState<R, AheadAdditionalData, ReceiveError, SendError> {
+    //     return when (this) {
+    //         is Data -> {
+    //             Data(
+    //                 when (remoteState) {
+    //                     is RemoteState.NotSynced -> {
+    //                         RemoteState.Synced(mapper(remoteState.value), remoteState.inProgress)
+    //                     }
+    //
+    //                     is RemoteState.Synced -> {
+    //                         RemoteState.Synced(mapper(remoteState.value), remoteState.inProgress)
+    //                     }
+    //                 },
+    //
+    //                 localAheadState?.let { ahead ->
+    //                     AheadState(
+    //                         mapper(ahead.value),
+    //                         ahead.inProgress,
+    //                         ahead.additional,
+    //                         ahead.lastError
+    //                     )
+    //                 }
+    //             )
+    //         }
+    //
+    //         is NoData -> {
+    //             NoData(remoteState)
+    //         }
+    //     }
+    // }
 }
+
+fun <T: Any, AheadAdditionalData, ReceiveError : Any, SendError : Any> RemoteChangeableState(
+    remoteState: RemoteState<T?, ReceiveError>,
+    localAheadState: RemoteChangeableState.AheadState<T, AheadAdditionalData, SendError>?
+): RemoteChangeableState<T, AheadAdditionalData, ReceiveError, SendError> {
+    return if (localAheadState != null) {
+        RemoteChangeableState.Data.Ahead(remoteState, localAheadState)
+    } else {
+        remoteState.eitherEmptyOrNot().handle(
+            {
+                RemoteChangeableState.NoData<T, AheadAdditionalData, ReceiveError>(it)
+            },
+            {
+                RemoteChangeableState.Data.NotAhead(it)
+            }
+        )
+    }
+}*/

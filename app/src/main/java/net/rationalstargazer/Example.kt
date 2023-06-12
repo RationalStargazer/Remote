@@ -1,4 +1,4 @@
-package net.rationalstargazer.networking
+package net.rationalstargazer
 
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
@@ -9,12 +9,14 @@ import net.rationalstargazer.events.queue.RStaEventsQueueDispatcher
 import net.rationalstargazer.events.value.RStaValue
 import net.rationalstargazer.events.value.RStaValueDispatcher
 import net.rationalstargazer.remote.RemoteData
-import net.rationalstargazer.remote.RemoteData.Companion.handle
+import net.rationalstargazer.remote.handle
 import kotlin.coroutines.CoroutineContext
 import kotlin.reflect.KClass
 
 /**
  * Example of my skills.
+ * (Only ViewModel is implemented, you will not find view or data layers here)
+ * (Still there is some interesting stuff in this repository for those who are really interested)
  */
 
 /**
@@ -147,18 +149,21 @@ sealed class ExampleState {
          * Original values (before the edit)
          */
         val initialValues: ExampleData,
-        
+    
         /**
          * Current values
          */
         val input: ExampleData,
-        
+    
         val validationResult: Map<ExampleKey, ValidationResult>,
     )
 }
 
 /**
- * View model
+ * View model.
+ * This example is a simplified example of UDF approach.
+ * Instead of implementation of each asynchronous command as separate suspend function
+ * that is supposed to be called at another place we do it inside the methods.
  */
 class ExampleSimpleModel : ViewModel() {
     
@@ -225,6 +230,10 @@ class ExampleSimpleModel : ViewModel() {
             }
             
             _state.value = startedState
+            
+            // This logic (and other similar logics in another methods) should be implemented as asynchronous command
+            // and handled separately from the view model to improve reliability.
+            // For simplicity of the example they are implemented right inside the correspondent methods.
     
             // start coroutine to do some asynchronous work
             // "non cancellable" means we don't want it to be cancelled at the moment when `lifecycle` was ended
@@ -235,20 +244,7 @@ class ExampleSimpleModel : ViewModel() {
             // (for example with `awaitCancellation`), it would complicate the tests)
             dispatcher.launchNonCancellable {
                 val remoteData = simpleExampleReceiver()
-    
-                // Let's notice that we have to work carefully with the states here.
-                // As we started the coroutine we have to consider that _state.value can be already changed to this time
-                whenState(_state.value, ExampleState.FirstLoading.InProgress::class) { state ->
-                    remoteData.handle(
-                        { data ->
-                            _state.value = state.mutateLoadSuccess(data)
-                        },
-                
-                        { fail ->
-                            _state.value = state.mutateLoadFailed(fail)
-                        }
-                    )
-                }
+                retryLoadFinished(remoteData)
             }
         }
     }
@@ -266,41 +262,36 @@ class ExampleSimpleModel : ViewModel() {
      * Submits new data to the server
      */
     fun submit() {
-        whenState(_state.value, ExampleState.Input.New::class) { state ->
-            if (!state.submitButtonEnabled) {
-                return
-            }
-    
-            // just validate it is not empty for simplicity
-            
-            val someThingValidation = if (state.data.input.someThing.isBlank()) {
+        whenState(_state.value, ExampleState.Input.New::class) { stateBefore ->
+            val someThingValidation = if (stateBefore.data.input.someThing.isBlank()) {
                 ValidationResult.Empty
             } else {
                 ValidationResult.Valid
             }
     
-            val anotherThingValidation = if (state.data.input.anotherThing.isBlank()) {
+            val anotherThingValidation = if (stateBefore.data.input.anotherThing.isBlank()) {
                 ValidationResult.Empty
             } else {
                 ValidationResult.Valid
             }
             
-            val validated = state
+            val validated = stateBefore
                 .mutateValidation(ExampleKey.SomeThing, someThingValidation)
                 .mutateValidation(ExampleKey.AnotherThing, anotherThingValidation)
             
             _state.value = validated
             
-            val maybeValid = validated.toLocallyValidInputOrNull()
-            if (maybeValid != null) {
-                _state.value = maybeValid.mutateStartSubmit()
-    
+            val submitState = validated
+                .toLocallyValidInputOrNull()
+                ?.mutateStartSubmitOrNull()
+            
+            if (submitState != null) {
+                _state.value = submitState
+                
+                // implemented here for the sake of simplicity
                 dispatcher.launchNonCancellable {
-                    val remoteData = simpleExampleSender(maybeValid.input)
-    
-                    whenState(_state.value, ExampleState.Submitting::class) {
-                        _state.value = it.mutateSubmitFinished(remoteData)
-                    }
+                    val remoteData = simpleExampleSender(submitState.valuesToSubmit)
+                    submitFinished(remoteData)
                 }
             }
         }
@@ -312,6 +303,26 @@ class ExampleSimpleModel : ViewModel() {
     fun discard() {
         whenState(_state.value, ExampleState.Input.New::class) {
             _state.value = it.mutateDiscard()
+        }
+    }
+    
+    fun retryLoadFinished(remoteData: RemoteData<ExampleData>) {
+        whenState(_state.value, ExampleState.FirstLoading.InProgress::class) { state ->
+            remoteData.handle(
+                { data ->
+                    _state.value = state.mutateLoadSuccess(data)
+                },
+            
+                { fail ->
+                    _state.value = state.mutateLoadFailed(fail)
+                }
+            )
+        }
+    }
+    
+    fun submitFinished(remoteData: RemoteData<SendResult<ExampleData, ExampleDataRejectedReason>>) {
+        whenState(_state.value, ExampleState.Submitting::class) {
+            _state.value = it.mutateSubmitFinished(remoteData)
         }
     }
     
@@ -329,7 +340,6 @@ class ExampleSimpleModel : ViewModel() {
     }
     
     // From here onward: the extension functions that describes all possible ways to turn one state into another.
-    // Each of them returns appropriate meaningful result in all situations.
     // This way we can enforce that only correct transformations will take place.
     
     private fun ExampleState.FirstLoading.mutateStartLoadOrNull(): ExampleState.FirstLoading.InProgress? {
@@ -375,7 +385,7 @@ class ExampleSimpleModel : ViewModel() {
                     data.validationResult - key
                 }
             ),
-            
+    
             lastSubmitResult = submittingState.lastResult
         )
     }
@@ -392,7 +402,11 @@ class ExampleSimpleModel : ViewModel() {
         return LocallyValidInput(initialValues = data.initialValues, input = data.input)
     }
     
-    private fun LocallyValidInput.mutateStartSubmit(): ExampleState.Submitting {
+    private fun LocallyValidInput.mutateStartSubmitOrNull(): ExampleState.Submitting? {
+        if (this.initialValues == this.input) {
+            return null
+        }
+        
         return ExampleState.Submitting(
             initialValues = initialValues,
             valuesToSubmit = input

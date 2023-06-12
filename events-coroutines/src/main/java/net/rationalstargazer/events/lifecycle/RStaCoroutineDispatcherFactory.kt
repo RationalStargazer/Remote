@@ -5,6 +5,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 
 object RStaCoroutineDispatcherFactory {
@@ -20,20 +21,24 @@ private class LifecycleBasedCoroutineDispatcherImpl(
 
     private val scope = CoroutineScope(context + SupervisorJob())
 
-    override fun autoCancellableScope(): CoroutineScope? {
+    override fun launchAutoCancellable(block: suspend CoroutineScope.() -> Unit) {
         if (lifecycle.finished) {
-            return null
+            return
         }
 
-        return CoroutineScope(scope.coroutineContext + Job(scope.coroutineContext.job))
+        CoroutineScope(scope.coroutineContext + Job(scope.coroutineContext.job)).launch {
+            block()
+        }
     }
 
-    override fun manuallyCancellableScope(): CoroutineScope? {
+    override fun launchNonCancellable(block: suspend CoroutineScope.() -> Unit) {
         if (lifecycle.finished) {
-            return null
+            return
         }
 
-        return CoroutineScope(scope.coroutineContext + Job())
+        CoroutineScope(scope.coroutineContext + Job()).launch {
+            block()
+        }
     }
 
     init {
